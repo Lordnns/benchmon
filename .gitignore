@@ -1,0 +1,26 @@
+# C build artifacts
+*.o
+*.a
+*.so
+*.so.*
+smoke_test
+
+# Dedicated Build/Release folders
+build/
+releases/
+
+# Rust
+tui/target/
+
+# Environment and Data protection
+.env
+data/
+db/
+*.log
+
+# Editor
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
