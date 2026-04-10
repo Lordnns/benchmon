@@ -29,6 +29,11 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y build-essential dpkg-dev
 
+    - name: Build TUI (Rust)
+      run: |
+        cd tui
+        cargo build --release
+
     - name: Build Debian Package
       run: |
         # Strip the 'v' out of the tag name (so v1.0.1 becomes 1.0.1)
@@ -46,11 +51,11 @@ jobs:
       # Only create an actual Release if this was triggered by a tag
       if: startsWith(github.ref, 'refs/tags/')
       with:
-        files: libbenchmon.deb
+        files: benchmon.deb
 
     - name: Upload Artifact (for manual runs)
       uses: actions/upload-artifact@v4
       # Always upload the artifact so you can download it from the Actions tab even without a tag
       with:
-        name: libbenchmon.deb
-        path: libbenchmon.deb
+        name: benchmon.deb
+        path: benchmon.deb

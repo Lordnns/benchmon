@@ -35,10 +35,12 @@ install: $(TARGET) $(STATIC)
 deb: all
 	mkdir -p benchmon_deb/usr/local/lib
 	mkdir -p benchmon_deb/usr/local/include
+	mkdir -p benchmon_deb/usr/local/bin
 	mkdir -p benchmon_deb/DEBIAN
 	cp $(TARGET) benchmon_deb/usr/local/lib/
 	cp $(STATIC) benchmon_deb/usr/local/lib/
 	cp include/benchmon.h benchmon_deb/usr/local/include/
-	echo "Package: libbenchmon\nVersion: $(VERSION)\nArchitecture: amd64\nMaintainer: Lordnns\nDescription: Latency-sensitive benchmark monitor library\n" > benchmon_deb/DEBIAN/control
-	dpkg-deb --build benchmon_deb libbenchmon.deb
+	-cp tui/target/release/benchmon benchmon_deb/usr/local/bin/ 2>/dev/null || true
+	echo "Package: benchmon\nVersion: $(VERSION)\nArchitecture: amd64\nMaintainer: Lordnns\nDescription: Latency-sensitive benchmark monitor library and TUI\n" > benchmon_deb/DEBIAN/control
+	dpkg-deb --build benchmon_deb benchmon.deb
 	rm -rf benchmon_deb
