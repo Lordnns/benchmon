@@ -9,9 +9,9 @@ on:
 jobs:
   build:
     name: Build deb package
-    # Using ubuntu-20.04 (an older LTS) is a trick to ensure the compiled 
+    # Using ubuntu-22.04 (an older LTS) to ensure the compiled 
     # binaries use an older glibc, making them compatible with almost all modern Linux distros!
-    runs-on: ubuntu-20.04 
+    runs-on: ubuntu-22.04 
     
     steps:
     - name: Checkout Code
