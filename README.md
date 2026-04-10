@@ -40,7 +40,7 @@ The library configures the system according to the paper's methodology:
 
 | Step                    | What it does                              | Reboot? |
 |------------------------|-------------------------------------------|---------|
-| GRUB / kernel params   | `isolcpus`, `nohz_full`, `rcu_nocbs`     | **Yes** |
+| GRUB / kernel params   | `isolcpus`, `nohz_full`, `rcu_nocbs`      | **Yes** |
 | SMT disable            | Runtime disable or BIOS recommendation    | Maybe   |
 | Frequency locking      | Disable boost, governor → performance     | No      |
 | IRQ affinity           | Migrate all IRQs to housekeeping core     | No      |
