@@ -5,6 +5,8 @@
 //!   /tmp/benchmon_cfg_<unix_ns>/
 //!       config.json
 
+#![allow(dead_code)]
+
 use std::fs;
 use chrono::{DateTime, Utc, TimeZone};
 use crate::ffi::SetupConfig;
