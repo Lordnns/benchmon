@@ -173,7 +173,7 @@ typedef struct {
  * Run all pre-flight verification checks.
  * Does not modify the system. Safe to call without root.
  */
-benchmon_status_t benchmon_verify(benchmon_verify_result_t *result);
+benchmon_status_t benchmon_verify(benchmon_verify_result_t *result, const benchmon_setup_config_t *cfg);
 
 /* ------------------------------------------------------------------ */
 /*  Monitor — Phase 2  (hot path, zero-alloc, constant-time)           */
