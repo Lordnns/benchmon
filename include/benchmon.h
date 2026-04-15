@@ -76,8 +76,8 @@ typedef struct {
   int isolate_multiuser; /* 1 = systemctl isolate multi-user*/
 
   /* Network namespaces ---------------------------------------------*/
-  const char *ns_server_name;   /* e.g. "ns-server"               */
-  const char *ns_client_name;   /* e.g. "ns-client"               */
+  const char *ns_server_name;   /* e.g. "ns_server"               */
+  const char *ns_client_name;   /* e.g. "ns_client"               */
   const char *veth_server_name; /* e.g. "veth-s"                  */
   const char *veth_client_name; /* e.g. "veth-c"                  */
   const char *server_ip;        /* e.g. "10.0.0.1/24"             */

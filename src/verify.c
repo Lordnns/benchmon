@@ -16,12 +16,99 @@
 #include <sys/utsname.h>
 
 /* ------------------------------------------------------------------ */
+/*  Helpers: extract names from config or active_config.json           */
+/* ------------------------------------------------------------------ */
+
+/* Defaults — match ffi.rs SetupConfig::default() */
+#define DEFAULT_NS_SERVER  "ns_server"
+#define DEFAULT_NS_CLIENT  "ns_client"
+#define DEFAULT_VETH_SRV   "veth-s"
+#define DEFAULT_VETH_CLI   "veth-c"
+
+/*
+ * Try to extract a JSON string value from the active config file.
+ * Returns 0 on success, -1 if not found.
+ * Minimal parser — no dependency on a JSON library.
+ */
+static int read_active_cfg_str(const char *key, char *out, size_t out_len) {
+    const char *path = "/var/lib/benchmon/active_config.json";
+    FILE *fp = fopen(path, "r");
+    if (!fp) return -1;
+
+    char buf[4096];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, fp);
+    fclose(fp);
+    buf[n] = '\0';
+
+    /* Find "key": "value" */
+    char needle[128];
+    snprintf(needle, sizeof(needle), "\"%s\":", key);
+    char *p = strstr(buf, needle);
+    if (!p) return -1;
+    p += strlen(needle);
+    while (*p == ' ' || *p == '\t') p++;
+    if (*p != '"') return -1;
+    p++;
+    char *end = strchr(p, '"');
+    if (!end) return -1;
+
+    size_t len = (size_t)(end - p);
+    if (len >= out_len) len = out_len - 1;
+    memcpy(out, p, len);
+    out[len] = '\0';
+    return 0;
+}
+
+/*
+ * Resolve a name: cfg field > active_config.json > hardcoded default.
+ */
+static const char *resolve_name(const benchmon_setup_config_t *cfg,
+                                const char *cfg_field,
+                                const char *json_key,
+                                const char *fallback,
+                                char *scratch, size_t scratch_len)
+{
+    /* 1. Explicit config */
+    if (cfg_field && cfg_field[0]) return cfg_field;
+
+    /* 2. Active config file */
+    if (read_active_cfg_str(json_key, scratch, scratch_len) == 0
+        && scratch[0])
+        return scratch;
+
+    /* 3. Default */
+    return fallback;
+}
+
+/* ------------------------------------------------------------------ */
 /*  Public: benchmon_verify()                                          */
 /* ------------------------------------------------------------------ */
 
-benchmon_status_t benchmon_verify(benchmon_verify_result_t *r) {
+benchmon_status_t benchmon_verify(benchmon_verify_result_t *r,
+                                  const benchmon_setup_config_t *cfg)
+{
     memset(r, 0, sizeof(*r));
     r->all_checks_passed = 1;  /* Assume good, clear on failure */
+
+    /* Resolve dynamic names */
+    char _ns_s[64], _ns_c[64], _ve_s[64], _ve_c[64];
+
+    const char *ns_s = resolve_name(cfg,
+        cfg ? cfg->ns_server_name : NULL,
+        "ns_server", DEFAULT_NS_SERVER, _ns_s, sizeof(_ns_s));
+
+    const char *ns_c = resolve_name(cfg,
+        cfg ? cfg->ns_client_name : NULL,
+        "ns_client", DEFAULT_NS_CLIENT, _ns_c, sizeof(_ns_c));
+
+    const char *ve_s = resolve_name(cfg,
+        cfg ? cfg->veth_server_name : NULL,
+        "veth_server", DEFAULT_VETH_SRV, _ve_s, sizeof(_ve_s));
+
+    /* ve_c not used in verify currently, but resolve for completeness */
+    (void)resolve_name(cfg,
+        cfg ? cfg->veth_client_name : NULL,
+        "veth_client", DEFAULT_VETH_CLI, _ve_c, sizeof(_ve_c));
 
     char buf[512];
 
@@ -140,23 +227,26 @@ benchmon_status_t benchmon_verify(benchmon_verify_result_t *r) {
                 sizeof(r->warnings) - strlen(r->warnings) - 1);
     }
 
-    /* ---- Network namespaces ---- */
+    /* ---- Network namespaces (dynamic names) ---- */
     char ns_list[512] = {0};
     benchmon_exec("ip netns list 2>/dev/null", ns_list, sizeof(ns_list));
-    r->ns_server_exists = (strstr(ns_list, "ns-server") != NULL);
-    r->ns_client_exists = (strstr(ns_list, "ns-client") != NULL);
+    r->ns_server_exists = (strstr(ns_list, ns_s) != NULL);
+    r->ns_client_exists = (strstr(ns_list, ns_c) != NULL);
 
-    /* ---- veth + offloading ---- */
+    /* ---- veth + offloading (dynamic names) ---- */
     if (r->ns_server_exists) {
-        char eth_out[256] = {0};
-        benchmon_exec("ip netns exec ns-server ethtool -k veth-s 2>/dev/null "
-                      "| grep 'generic-segmentation-offload'",
-                      eth_out, sizeof(eth_out));
+        char eth_cmd[256], eth_out[256] = {0};
+        snprintf(eth_cmd, sizeof(eth_cmd),
+                 "ip netns exec %s ethtool -k %s 2>/dev/null "
+                 "| grep 'generic-segmentation-offload'",
+                 ns_s, ve_s);
+        benchmon_exec(eth_cmd, eth_out, sizeof(eth_out));
         r->offloading_disabled = (strstr(eth_out, "off") != NULL);
 
-        char tc_out[256] = {0};
-        benchmon_exec("ip netns exec ns-server tc qdisc show 2>/dev/null",
-                      tc_out, sizeof(tc_out));
+        char tc_cmd[256], tc_out[256] = {0};
+        snprintf(tc_cmd, sizeof(tc_cmd),
+                 "ip netns exec %s tc qdisc show 2>/dev/null", ns_s);
+        benchmon_exec(tc_cmd, tc_out, sizeof(tc_out));
         r->netem_active = (strstr(tc_out, "netem") != NULL);
         r->veth_link_up = (strstr(tc_out, "veth") != NULL) ||
                           r->ns_server_exists;
@@ -178,7 +268,7 @@ benchmon_status_t benchmon_verify(benchmon_verify_result_t *r) {
 
 benchmon_status_t benchmon_report(int fd) {
     benchmon_verify_result_t v;
-    benchmon_verify(&v);
+    benchmon_verify(&v, NULL);  /* NULL = read from active config */
 
     dprintf(fd,
         "╔══════════════════════════════════════════╗\n"

@@ -208,6 +208,7 @@ extern "C" {
 
     pub fn benchmon_verify(
         result: *mut benchmon_verify_result_t,
+        cfg: *const benchmon_setup_config_t,
     ) -> benchmon_status_t;
 
     pub fn benchmon_monitor_init(

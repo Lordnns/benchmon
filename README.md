@@ -10,25 +10,25 @@ A Reproducible Methodology for Sub-Millisecond Measurements on Linux"*
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    benchmon TUI (Rust)                   │
-│  ┌───────┐ ┌──────┐ ┌────────┐ ┌─────┐ ┌──────────┐   │
-│  │Dashbrd│ │Setup │ │Monitor │ │Logs │ │Terminal  │   │
-│  └───┬───┘ └──┬───┘ └───┬────┘ └──┬──┘ └────┬─────┘   │
+│                    benchmon TUI (Rust)                  │
+│  ┌───────┐ ┌──────┐ ┌────────┐ ┌─────┐ ┌──────────┐     │
+│  │Dashbrd│ │Setup │ │Monitor │ │Logs │ │Terminal  │     │
+│  └───┬───┘ └──┬───┘ └───┬────┘ └──┬──┘ └────┬─────┘     │
 │      │        │         │         │          │          │
 │      └────────┴─────────┴─────────┴──────────┘          │
-│                         │ FFI (bindgen)                  │
+│                         │ FFI (bindgen)                 │
 ├─────────────────────────┼───────────────────────────────┤
-│              libbenchmon.so (C)                          │
-│  ┌────────┐ ┌─────────┐ ┌────────┐ ┌────────────────┐  │
-│  │ setup  │ │ monitor │ │ verify │ │ net passthru   │  │
-│  │ .c     │ │ .c      │ │ .c     │ │ (kmod stub)    │  │
-│  └────────┘ └─────────┘ └────────┘ └────────────────┘  │
+│              libbenchmon.so (C)                         │
+│  ┌──────┐ ┌───────┐ ┌──────┐ ┌──────┐ ┌───────────────┐ │
+│  │setup │ │monitor│ │verify│ │utils │ │ net passthru  │ │
+│  │  .c  │ │  .c   │ │  .c  │ │  .c  │ │  (kmod stub)  │ │
+│  └──────┘ └───────┘ └──────┘ └──────┘ └───────────────┘ │
 ├─────────────────────────────────────────────────────────┤
 │  Linux Kernel                                           │
-│  ┌──────────┐ ┌───────────┐ ┌────────┐ ┌────────────┐  │
-│  │perf_event│ │ sysfs/    │ │ netns  │ │ benchmon   │  │
-│  │  (CPU)   │ │ procfs    │ │ + veth │ │ _net kmod  │  │
-│  └──────────┘ └───────────┘ └────────┘ └────────────┘  │
+│  ┌──────────┐ ┌───────────┐ ┌────────┐ ┌────────────┐   │
+│  │perf_event│ │ sysfs/    │ │ netns  │ │ benchmon   │   │
+│  │  (CPU)   │ │ procfs    │ │ + veth │ │ _net kmod  │   │
+│  └──────────┘ └───────────┘ └────────┘ └────────────┘   │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -113,12 +113,37 @@ cargo build --release
 
 ### Install
 
+**Option 1: Pre-built Package (Recommended)**
+
+The easiest way to install on Debian/Ubuntu is to download the `.deb` from the GitHub Releases page. This single package gives you everything automatically: the interactive `benchmon` TUI dashboard, the C libraries (`libbenchmon.so`/`.a`), and the headers (`benchmon.h`).
+
 ```bash
-# Library
+# Note: Check the Releases page for the specific version tag
+wget https://github.com/Lordnns/benchmon/releases/download/{VERSION}/benchmon.deb
+sudo dpkg -i benchmon.deb
+```
+
+**Option 2: Build from Source**
+
+If you prefer compiling things yourself:
+```bash
+# 1. Install Library & Headers
 sudo make install   # installs to /usr/local/lib + /usr/local/include
 
-# TUI binary
+# 2. Install TUI binary (requires 'cargo build --release' in tui/ directory)
 sudo cp tui/target/release/benchmon /usr/local/bin/
+```
+
+### Developing with libbenchmon
+
+Once installed (using either method), you can freely link the tool inside your C/C++ projects:
+
+```c
+#include <benchmon.h>
+```
+Compile with:
+```bash
+gcc -o my_app my_app.c -lbenchmon
 ```
 
 ## Usage

@@ -70,10 +70,10 @@ impl Default for SetupConfig {
             stop_irqbalance: true,
             disable_swap: true,
             isolate_multiuser: false,
-            ns_server: "ns-server".into(),
-            ns_client: "ns-client".into(),
-            veth_server: "veth-s".into(),
-            veth_client: "veth-c".into(),
+            ns_server: "ns_server".into(),
+            ns_client: "ns_client".into(),
+            veth_server: "veth-srv".into(),
+            veth_client: "veth-cli".into(),
             server_ip: "10.0.0.1/24".into(),
             client_ip: "10.0.0.2/24".into(),
             netem_delay_ms: 25,
@@ -222,8 +222,27 @@ pub struct VerifyResult {
 }
 
 pub fn run_verify() -> VerifyResult {
+    run_verify_with_config(None)
+}
+
+pub fn run_verify_with_config(cfg: Option<&SetupConfig>) -> VerifyResult {
     let mut c_res: benchmon_verify_result_t = unsafe { std::mem::zeroed() };
-    unsafe { benchmon_verify(&mut c_res) };
+
+    match cfg {
+        Some(cfg) => {
+            let ns_s = opt_cstring(&cfg.ns_server);
+            let ns_c = opt_cstring(&cfg.ns_client);
+            let ve_s = opt_cstring(&cfg.veth_server);
+            let ve_c = opt_cstring(&cfg.veth_client);
+            let ip_s = opt_cstring(&cfg.server_ip);
+            let ip_c = opt_cstring(&cfg.client_ip);
+            let c_cfg = make_c_cfg(cfg, &ns_s, &ns_c, &ve_s, &ve_c, &ip_s, &ip_c);
+            unsafe { benchmon_verify(&mut c_res, &c_cfg) };
+        }
+        None => {
+            unsafe { benchmon_verify(&mut c_res, std::ptr::null()) };
+        }
+    }
 
     let mut iso_list = Vec::new();
     for i in 0..c_res.isolated_core_count as usize {
