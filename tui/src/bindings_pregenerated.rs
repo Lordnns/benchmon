@@ -19,7 +19,7 @@ pub type benchmon_status_t = c_int;
 // ------------------------------------------------------------------ //
 
 #[repr(C)]
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct benchmon_setup_config_t {
     pub isolated_cores: *const c_int,
     pub isolated_cores_count: c_int,
@@ -41,13 +41,19 @@ pub struct benchmon_setup_config_t {
     pub netem_jitter_ms: c_int,
     pub netem_loss_pct: c_double,
     pub disable_offloading: c_int,
-    pub server_cores: [c_char; 64],
-    pub client_cores: [c_char; 64],
+    pub server_cores: *const c_char,
+    pub client_cores: *const c_char,
     pub rt_priority: c_int,
     pub disable_aslr: c_int,
     pub tune_net_buffers: c_int,
     pub drop_caches: c_int,
     pub stop_timesyncd: c_int,
+}
+
+impl Default for benchmon_setup_config_t {
+    fn default() -> Self {
+        unsafe { std::mem::zeroed() }
+    }
 }
 
 #[repr(C)]

@@ -14,8 +14,8 @@
 #include <stdarg.h>
 #include <unistd.h>
 #include <errno.h>
-#include <sys/stat.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -216,26 +216,23 @@ static void setup_swap(const benchmon_setup_config_t *cfg,
 #define PRECONFIG_SYSCTL "/var/lib/benchmon/preconfig_sysctl.json"
 
 static void capture_sysctl_preconfig(void) {
-    /* Read current values */
+    struct stat st;
+    if (stat(PRECONFIG_SYSCTL, &st) == 0) return; /* already captured */
+
     long aslr = 2, rmem_max = 212992, wmem_max = 212992;
     long rmem_def = 212992, wmem_def = 212992, backlog = 1000;
 
     benchmon_read_sysfs_int("/proc/sys/kernel/randomize_va_space", &aslr);
-    benchmon_read_sysfs_int("/proc/sys/net/core/rmem_max",         &rmem_max);
-    benchmon_read_sysfs_int("/proc/sys/net/core/wmem_max",         &wmem_max);
-    benchmon_read_sysfs_int("/proc/sys/net/core/rmem_default",     &rmem_def);
-    benchmon_read_sysfs_int("/proc/sys/net/core/wmem_default",     &wmem_def);
-    benchmon_read_sysfs_int("/proc/sys/net/core/netdev_max_backlog",&backlog);
+    benchmon_read_sysfs_int("/proc/sys/net/core/rmem_max",          &rmem_max);
+    benchmon_read_sysfs_int("/proc/sys/net/core/wmem_max",          &wmem_max);
+    benchmon_read_sysfs_int("/proc/sys/net/core/rmem_default",      &rmem_def);
+    benchmon_read_sysfs_int("/proc/sys/net/core/wmem_default",      &wmem_def);
+    benchmon_read_sysfs_int("/proc/sys/net/core/netdev_max_backlog", &backlog);
 
-    /* Check timesyncd state */
     char tstate[32] = {0};
     benchmon_exec("systemctl is-active systemd-timesyncd 2>/dev/null",
                   tstate, sizeof(tstate));
     int timesyncd_active = (strncmp(tstate, "active", 6) == 0) ? 1 : 0;
-
-    /* Write JSON — only if not already saved (idempotent) */
-    struct stat st;
-    if (stat(PRECONFIG_SYSCTL, &st) == 0) return; /* already captured */
 
     benchmon_exec("mkdir -p /var/lib/benchmon", NULL, 0);
 
@@ -254,10 +251,11 @@ static void capture_sysctl_preconfig(void) {
              rmem_def, wmem_def, backlog,
              timesyncd_active ? "true" : "false");
 
-    int fd = open(PRECONFIG_SYSCTL, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (fd >= 0) {
-        (void)write(fd, json, strlen(json));
-        close(fd);
+    /* Use fopen/fputs to avoid warn_unused_result on write() */
+    FILE *fp = fopen(PRECONFIG_SYSCTL, "w");
+    if (fp) {
+        fputs(json, fp);
+        fclose(fp);
     }
 }
 
@@ -266,23 +264,25 @@ static void restore_sysctl_preconfig(void) {
     if (!fp) return;
 
     char buf[512] = {0};
-    (void)fread(buf, 1, sizeof(buf) - 1, fp);
+    size_t n = fread(buf, 1, sizeof(buf) - 1, fp);
     fclose(fp);
+    buf[n] = '\0';
 
-    /* Minimal JSON extraction — same approach as snapshot_store.rs */
-    #define EXTRACT_INT(key, default_val) ({ \
-        long _v = (default_val); \
+    #define EXTRACT_INT(key, dfl) ({ \
+        long _v = (dfl); \
         char *_p = strstr(buf, "\"" key "\":"); \
         if (_p) { _p += strlen("\"" key "\":"); while (*_p == ' ') _p++; _v = strtol(_p, NULL, 10); } \
         _v; \
     })
 
-    long aslr     = EXTRACT_INT("aslr",              2);
-    long rmem_max = EXTRACT_INT("rmem_max",      212992);
-    long wmem_max = EXTRACT_INT("wmem_max",      212992);
-    long rmem_def = EXTRACT_INT("rmem_default",  212992);
-    long wmem_def = EXTRACT_INT("wmem_default",  212992);
-    long backlog  = EXTRACT_INT("netdev_max_backlog", 1000);
+    long aslr     = EXTRACT_INT("aslr",                   2);
+    long rmem_max = EXTRACT_INT("rmem_max",           212992);
+    long wmem_max = EXTRACT_INT("wmem_max",           212992);
+    long rmem_def = EXTRACT_INT("rmem_default",       212992);
+    long wmem_def = EXTRACT_INT("wmem_default",       212992);
+    long backlog  = EXTRACT_INT("netdev_max_backlog",   1000);
+
+    #undef EXTRACT_INT
 
     char *tp = strstr(buf, "\"timesyncd_was_active\":");
     int timesyncd_was_active = 0;
@@ -292,27 +292,29 @@ static void restore_sysctl_preconfig(void) {
         timesyncd_was_active = (strncmp(tp, "true", 4) == 0);
     }
 
-    #undef EXTRACT_INT
-
-    /* Restore sysctls */
     char cmd[256];
-    snprintf(cmd, sizeof(cmd), "sysctl -w kernel.randomize_va_space=%ld 2>/dev/null", aslr);
+    snprintf(cmd, sizeof(cmd),
+             "sysctl -w kernel.randomize_va_space=%ld 2>/dev/null", aslr);
     benchmon_exec(cmd, NULL, 0);
-    snprintf(cmd, sizeof(cmd), "sysctl -w net.core.rmem_max=%ld 2>/dev/null", rmem_max);
+    snprintf(cmd, sizeof(cmd),
+             "sysctl -w net.core.rmem_max=%ld 2>/dev/null", rmem_max);
     benchmon_exec(cmd, NULL, 0);
-    snprintf(cmd, sizeof(cmd), "sysctl -w net.core.wmem_max=%ld 2>/dev/null", wmem_max);
+    snprintf(cmd, sizeof(cmd),
+             "sysctl -w net.core.wmem_max=%ld 2>/dev/null", wmem_max);
     benchmon_exec(cmd, NULL, 0);
-    snprintf(cmd, sizeof(cmd), "sysctl -w net.core.rmem_default=%ld 2>/dev/null", rmem_def);
+    snprintf(cmd, sizeof(cmd),
+             "sysctl -w net.core.rmem_default=%ld 2>/dev/null", rmem_def);
     benchmon_exec(cmd, NULL, 0);
-    snprintf(cmd, sizeof(cmd), "sysctl -w net.core.wmem_default=%ld 2>/dev/null", wmem_def);
+    snprintf(cmd, sizeof(cmd),
+             "sysctl -w net.core.wmem_default=%ld 2>/dev/null", wmem_def);
     benchmon_exec(cmd, NULL, 0);
-    snprintf(cmd, sizeof(cmd), "sysctl -w net.core.netdev_max_backlog=%ld 2>/dev/null", backlog);
+    snprintf(cmd, sizeof(cmd),
+             "sysctl -w net.core.netdev_max_backlog=%ld 2>/dev/null", backlog);
     benchmon_exec(cmd, NULL, 0);
 
     if (timesyncd_was_active)
         benchmon_exec("systemctl start systemd-timesyncd 2>/dev/null", NULL, 0);
 
-    /* Remove preconfig so next setup can capture a fresh snapshot */
     remove(PRECONFIG_SYSCTL);
 }
 
@@ -323,15 +325,14 @@ static void restore_sysctl_preconfig(void) {
 static void setup_sysctl(const benchmon_setup_config_t *cfg,
                          benchmon_setup_result_t *res)
 {
-    int did_anything = 0;
+    int did = 0;
 
     if (cfg->disable_aslr) {
         benchmon_exec("sysctl -w kernel.randomize_va_space=0 2>/dev/null",
                       NULL, 0);
-        result_append(res, "SYSCTL: ASLR disabled (randomize_va_space=0)");
-        did_anything = 1;
+        result_append(res, "SYSCTL: ASLR disabled");
+        did = 1;
     }
-
     if (cfg->tune_net_buffers) {
         benchmon_exec("sysctl -w net.core.rmem_max=26214400 2>/dev/null",
                       NULL, 0);
@@ -343,68 +344,63 @@ static void setup_sysctl(const benchmon_setup_config_t *cfg,
                       NULL, 0);
         benchmon_exec("sysctl -w net.core.netdev_max_backlog=5000 2>/dev/null",
                       NULL, 0);
-        result_append(res, "SYSCTL: net buffers tuned (rmem/wmem 26MB, backlog 5000)");
-        did_anything = 1;
+        result_append(res, "SYSCTL: net buffers tuned");
+        did = 1;
     }
-
     if (cfg->stop_timesyncd) {
         benchmon_exec("systemctl stop systemd-timesyncd 2>/dev/null", NULL, 0);
         benchmon_exec("systemctl stop NetworkManager-wait-online 2>/dev/null",
                       NULL, 0);
-        result_append(res, "SYSCTL: timesyncd + NM-wait-online stopped");
-        did_anything = 1;
+        result_append(res, "SYSCTL: timesyncd stopped");
+        did = 1;
     }
-
     if (cfg->drop_caches) {
         benchmon_exec("sync && echo 3 > /proc/sys/vm/drop_caches 2>/dev/null",
                       NULL, 0);
         res->caches_dropped = 1;
         result_append(res, "CACHE: page cache dropped");
-        did_anything = 1;
+        did = 1;
     }
-
-    if (did_anything)
-        res->sysctl_tuned = 1;
+    if (did) res->sysctl_tuned = 1;
 }
 
 /* ------------------------------------------------------------------ */
-/*  Process isolation config — validate and record                     */
+/*  Process isolation config                                           */
 /* ------------------------------------------------------------------ */
 
 static void setup_process_isolation(const benchmon_setup_config_t *cfg,
                                     benchmon_setup_result_t *res)
 {
-    if (cfg->server_cores[0] == '\0' && cfg->rt_priority == 0) return;
+    if ((!cfg->server_cores || cfg->server_cores[0] == '\0') &&
+        cfg->rt_priority == 0) return;
 
-    /* Validate: check that the cores exist */
-    if (cfg->server_cores[0] != '\0') {
+    if (cfg->server_cores && cfg->server_cores[0] != '\0') {
         char cmd[256];
-        snprintf(cmd, sizeof(cmd),
-                 "taskset -c %s true 2>/dev/null", cfg->server_cores);
+        snprintf(cmd, sizeof(cmd), "taskset -c %s true 2>/dev/null",
+                 cfg->server_cores);
         if (benchmon_exec(cmd, NULL, 0) != 0) {
             result_append(res,
-                "PROC: WARNING — server_cores '%s' invalid or taskset unavailable",
+                "PROC: WARNING — server_cores '%s' invalid",
                 cfg->server_cores);
             return;
         }
     }
-    if (cfg->client_cores[0] != '\0') {
+    if (cfg->client_cores && cfg->client_cores[0] != '\0') {
         char cmd[256];
-        snprintf(cmd, sizeof(cmd),
-                 "taskset -c %s true 2>/dev/null", cfg->client_cores);
+        snprintf(cmd, sizeof(cmd), "taskset -c %s true 2>/dev/null",
+                 cfg->client_cores);
         if (benchmon_exec(cmd, NULL, 0) != 0) {
             result_append(res,
-                "PROC: WARNING — client_cores '%s' invalid or taskset unavailable",
+                "PROC: WARNING — client_cores '%s' invalid",
                 cfg->client_cores);
             return;
         }
     }
 
     res->process_isolation_ready = 1;
-    result_append(res,
-        "PROC: server_cores=%s client_cores=%s rt_priority=%d",
-        cfg->server_cores[0] ? cfg->server_cores : "(unset)",
-        cfg->client_cores[0] ? cfg->client_cores : "(unset)",
+    result_append(res, "PROC: server=%s client=%s rt=%d",
+        cfg->server_cores ? cfg->server_cores : "(unset)",
+        cfg->client_cores ? cfg->client_cores : "(unset)",
         cfg->rt_priority);
 }
 
@@ -552,9 +548,7 @@ benchmon_status_t benchmon_setup(const benchmon_setup_config_t *cfg,
     }
 
     int err = 0;
-    /* Capture sysctl preconfig BEFORE modifying anything */
     capture_sysctl_preconfig();
-
     if (setup_grub(cfg, res)    < 0) err++;
     if (setup_smt(cfg, res)     < 0) err++;
     setup_freq(cfg, res);
@@ -604,7 +598,6 @@ benchmon_status_t benchmon_teardown(const benchmon_setup_config_t *cfg) {
     if (cfg->disable_swap)
         benchmon_exec("swapon -a 2>/dev/null", NULL, 0);
 
-    /* Restore sysctl values captured before setup */
     restore_sysctl_preconfig();
 
     return BENCHMON_OK;
@@ -620,15 +613,13 @@ char *benchmon_get_launch_prefix(const benchmon_setup_config_t *cfg,
     char buf[256] = {0};
     const char *cores = is_server ? cfg->server_cores : cfg->client_cores;
 
-    if (cores && cores[0] != '\0' && cfg->rt_priority > 0) {
-        snprintf(buf, sizeof(buf),
-                 "taskset -c %s chrt -f %d ", cores, cfg->rt_priority);
-    } else if (cores && cores[0] != '\0') {
+    if (cores && cores[0] != '\0' && cfg->rt_priority > 0)
+        snprintf(buf, sizeof(buf), "taskset -c %s chrt -f %d ",
+                 cores, cfg->rt_priority);
+    else if (cores && cores[0] != '\0')
         snprintf(buf, sizeof(buf), "taskset -c %s ", cores);
-    } else if (cfg->rt_priority > 0) {
+    else if (cfg->rt_priority > 0)
         snprintf(buf, sizeof(buf), "chrt -f %d ", cfg->rt_priority);
-    }
-    /* else: empty string — no pinning */
 
     char *out = (char *)malloc(strlen(buf) + 1);
     if (out) strcpy(out, buf);

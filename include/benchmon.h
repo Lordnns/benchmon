@@ -88,13 +88,10 @@ typedef struct {
   int netem_jitter_ms;   /* Jitter in ms (normal dist)     */
   double netem_loss_pct; /* Loss % per direction           */
 
-  /* Offloading -----------------------------------------------------*/
-  int disable_offloading; /* 1 = disable TSO/GSO/GRO        */
-
   /* Process isolation (stored here so scripts need zero hardcoding) */
-  char server_cores[64];  /* taskset -c arg, e.g. "2,4"     */
-  char client_cores[64];  /* taskset -c arg, e.g. "3,5"     */
-  int  rt_priority;       /* chrt -f value; 0 = no RT sched */
+  const char *server_cores;  /* taskset -c arg, e.g. "2,4"     */
+  const char *client_cores;  /* taskset -c arg, e.g. "3,5"     */
+  int         rt_priority;   /* chrt -f value; 0 = no RT sched */
 
   /* Sysctl tuning --------------------------------------------------*/
   int disable_aslr;       /* 1 = randomize_va_space → 0     */
@@ -122,9 +119,9 @@ typedef struct {
   int swap_disabled;
   int services_stopped;
   int frequency_locked;
-  int sysctl_tuned;           /* ASLR + net buffers applied     */
-  int caches_dropped;         /* page cache flushed             */
-  int process_isolation_ready;/* server_cores/client_cores set  */
+  int sysctl_tuned;
+  int caches_dropped;
+  int process_isolation_ready;
 } benchmon_setup_result_t;
 
 /**
@@ -141,18 +138,13 @@ benchmon_status_t benchmon_setup(const benchmon_setup_config_t *cfg,
 /**
  * Tear down: remove namespaces, restore IRQ affinity, re-enable swap,
  * and restore all sysctl values captured during setup.
- * Does NOT undo GRUB changes (those persist across reboots).
  */
 benchmon_status_t benchmon_teardown(const benchmon_setup_config_t *cfg);
 
 /**
- * Return a heap-allocated shell prefix string for launching a benchmark
- * process with the correct taskset + chrt settings from the config.
- *
- * is_server: 1 = use server_cores, 0 = use client_cores
- *
+ * Return a heap-allocated shell prefix for launching a benchmark process.
+ * is_server: 1 = use server_cores, 0 = use client_cores.
  * Example output: "taskset -c 2,4 chrt -f 50 "
- * Returns "" (empty string, still heap-allocated) when no pinning configured.
  * Caller must free() the returned string.
  */
 char *benchmon_get_launch_prefix(const benchmon_setup_config_t *cfg,
