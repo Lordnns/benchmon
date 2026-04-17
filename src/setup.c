@@ -15,6 +15,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <fcntl.h>
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -255,7 +256,7 @@ static void capture_sysctl_preconfig(void) {
 
     int fd = open(PRECONFIG_SYSCTL, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd >= 0) {
-        write(fd, json, strlen(json));
+        (void)write(fd, json, strlen(json));
         close(fd);
     }
 }
@@ -265,7 +266,7 @@ static void restore_sysctl_preconfig(void) {
     if (!fp) return;
 
     char buf[512] = {0};
-    fread(buf, 1, sizeof(buf) - 1, fp);
+    (void)fread(buf, 1, sizeof(buf) - 1, fp);
     fclose(fp);
 
     /* Minimal JSON extraction — same approach as snapshot_store.rs */
