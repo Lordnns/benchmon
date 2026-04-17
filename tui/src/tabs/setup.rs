@@ -25,6 +25,13 @@ const SETUP_ITEMS: &[(&str, FieldKind)] = &[
     ("NetEm jitter (ms)",                FieldKind::Edit),
     ("NetEm loss (%)",                   FieldKind::Edit),
     ("Disable offloading",               FieldKind::Toggle),
+    ("Server cores (e.g. 2,4)",          FieldKind::Edit),
+    ("Client cores (e.g. 3,5)",          FieldKind::Edit),
+    ("RT priority (chrt -f)",            FieldKind::Edit),
+    ("Disable ASLR",                     FieldKind::Toggle),
+    ("Tune net buffers",                 FieldKind::Toggle),
+    ("Drop caches on apply",             FieldKind::Toggle),
+    ("Stop timesyncd",                   FieldKind::Toggle),
     ("─── Actions ───",                  FieldKind::Separator),
     ("▶  APPLY SETUP",                   FieldKind::Action),
     ("▶  TEARDOWN",                      FieldKind::Action),
@@ -145,15 +152,18 @@ fn render_form(f: &mut Frame, area: Rect, app: &App) {
         }
 
         for (label, ok) in [
-            ("GRUB modified",       r.grub_modified),
-            ("SMT disabled",        r.smt_disabled),
-            ("IRQ migrated",        r.irq_migrated),
-            ("Namespaces created",  r.namespaces_created),
-            ("NetEm applied",       r.netem_applied),
-            ("Offloading disabled", r.offloading_disabled),
-            ("Swap disabled",       r.swap_disabled),
-            ("Services stopped",    r.services_stopped),
-            ("Frequency locked",    r.frequency_locked),
+            ("GRUB modified",           r.grub_modified),
+            ("SMT disabled",            r.smt_disabled),
+            ("IRQ migrated",            r.irq_migrated),
+            ("Namespaces created",      r.namespaces_created),
+            ("NetEm applied",           r.netem_applied),
+            ("Offloading disabled",     r.offloading_disabled),
+            ("Swap disabled",           r.swap_disabled),
+            ("Services stopped",        r.services_stopped),
+            ("Frequency locked",        r.frequency_locked),
+            ("Sysctl tuned",            r.sysctl_tuned),
+            ("Caches dropped",          r.caches_dropped),
+            ("Process isolation ready", r.process_isolation_ready),
         ] {
             let (icon, color) = if ok { ("✓", Color::Green) } else { ("·", Color::DarkGray) };
             lines.push(Line::from(Span::styled(
@@ -379,6 +389,13 @@ fn get_config_value(app: &App, idx: usize) -> String {
         13 => format!("{}", c.netem_jitter_ms),
         14 => format!("{:.2}", c.netem_loss_pct),
         15 => bool_str(c.disable_offloading),
+        16 => c.server_cores.clone(),
+        17 => c.client_cores.clone(),
+        18 => format!("{}", c.rt_priority),
+        19 => bool_str(c.disable_aslr),
+        20 => bool_str(c.tune_net_buffers),
+        21 => bool_str(c.drop_caches),
+        22 => bool_str(c.stop_timesyncd),
         _  => String::new(),
     }
 }
@@ -466,6 +483,16 @@ pub fn commit_edit(app: &mut App) {
                 false
             }
         }
+        16 => { app.setup_config.server_cores = buf; true }
+        17 => { app.setup_config.client_cores = buf; true }
+        18 => {
+            if let Ok(v) = buf.parse::<i32>() {
+                app.setup_config.rt_priority = v; true
+            } else {
+                app.log(LogLevel::Error, "RT priority: must be an integer (1-99)");
+                false
+            }
+        }
         _ => false,
     };
 
@@ -485,14 +512,18 @@ fn toggle_field(app: &mut App, idx: usize) {
         6  => app.setup_config.disable_swap             = !app.setup_config.disable_swap,
         7  => app.setup_config.isolate_multiuser        = !app.setup_config.isolate_multiuser,
         15 => app.setup_config.disable_offloading       = !app.setup_config.disable_offloading,
+        19 => app.setup_config.disable_aslr             = !app.setup_config.disable_aslr,
+        20 => app.setup_config.tune_net_buffers         = !app.setup_config.tune_net_buffers,
+        21 => app.setup_config.drop_caches              = !app.setup_config.drop_caches,
+        22 => app.setup_config.stop_timesyncd           = !app.setup_config.stop_timesyncd,
         _  => {}
     }
 }
 
 fn run_action(app: &mut App, idx: usize) {
     match idx {
-        // APPLY SETUP
-        17 => {
+        // APPLY SETUP — index 24 (was 17)
+        24 => {
             // Save a config snapshot BEFORE applying
              match snapshot_store::save(&snapshot_store::capture_current_state(), "preconfig") {
                 Some(path) => app.log(LogLevel::Info,
@@ -547,12 +578,12 @@ fn run_action(app: &mut App, idx: usize) {
             snapshot_store::save_active(&app.setup_config);
             app.refresh_verify();
         }
-        // TEARDOWN — open picker
-        18 => {
+        // TEARDOWN — index 25 (was 18)
+        25 => {
             app.open_teardown_picker();
         }
-        // REFRESH VERIFY
-        19 => {
+        // REFRESH VERIFY — index 26 (was 19)
+        26 => {
             app.refresh_verify();
         }
         _ => {}

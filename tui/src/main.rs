@@ -78,6 +78,17 @@ fn main() -> color_eyre::Result<()> {
         return Ok(());
     }
 
+    // launch-prefix — emit taskset/chrt prefix for benchmark scripts
+    // Usage: benchmon launch-prefix [server|client]
+    // Scripts: PREFIX=$(benchmon launch-prefix server)
+    //          ip netns exec ns_server $PREFIX ./server quic --port 8000
+    if args.get(1).map(|s| s.as_str()) == Some("launch-prefix") {
+        let cfg = snapshot_store::load_active().unwrap_or_else(ffi::SetupConfig::default);
+        let is_server = args.get(2).map(|s| s.as_str()) != Some("client");
+        print!("{}", ffi::get_launch_prefix(&cfg, is_server));
+        return Ok(());
+    }
+
     // ---------------------------------------------------------------- //
     //  TUI mode (default)                                               //
     // ---------------------------------------------------------------- //
@@ -325,7 +336,7 @@ fn handle_key(app: &mut App, key: KeyEvent) {
         KeyCode::Up => {
             if app.active_tab == Tab::Setup && app.setup_selected_item > 0 {
                 app.setup_selected_item -= 1;
-                if app.setup_selected_item == 16 && app.setup_selected_item > 0 {
+                if app.setup_selected_item == 23 && app.setup_selected_item > 0 {
                     app.setup_selected_item -= 1;
                 }
             }
@@ -335,7 +346,7 @@ fn handle_key(app: &mut App, key: KeyEvent) {
                 let max = tabs::setup::item_count() - 1;
                 if app.setup_selected_item < max {
                     app.setup_selected_item += 1;
-                    if app.setup_selected_item == 16 { app.setup_selected_item += 1; }
+                    if app.setup_selected_item == 23 { app.setup_selected_item += 1; }
                 }
             }
         }

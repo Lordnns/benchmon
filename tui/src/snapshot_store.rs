@@ -140,7 +140,14 @@ fn to_json(c: &SetupConfig) -> String {
           \"netem_delay_ms\": {delay},\n\
           \"netem_jitter_ms\": {jitter},\n\
           \"netem_loss_pct\": {loss},\n\
-          \"disable_offloading\": {offload}\n\
+          \"disable_offloading\": {offload},\n\
+          \"server_cores\": \"{srv_cores}\",\n\
+          \"client_cores\": \"{cli_cores}\",\n\
+          \"rt_priority\": {rt_prio},\n\
+          \"disable_aslr\": {aslr},\n\
+          \"tune_net_buffers\": {netbuf},\n\
+          \"drop_caches\": {caches},\n\
+          \"stop_timesyncd\": {timesyncd}\n\
         }}",
         cores   = c.isolated_cores.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(", "),
         hk      = c.housekeeping_core,
@@ -160,6 +167,13 @@ fn to_json(c: &SetupConfig) -> String {
         jitter  = c.netem_jitter_ms,
         loss    = c.netem_loss_pct,
         offload = c.disable_offloading,
+        srv_cores = c.server_cores,
+        cli_cores = c.client_cores,
+        rt_prio   = c.rt_priority,
+        aslr      = c.disable_aslr,
+        netbuf    = c.tune_net_buffers,
+        caches    = c.drop_caches,
+        timesyncd = c.stop_timesyncd,
     )
 }
 
@@ -188,6 +202,13 @@ fn from_json(json: &str) -> Option<SetupConfig> {
     if let Some(v) = json_int(json, "netem_jitter_ms")        { c.netem_jitter_ms          = v as i32; }
     if let Some(v) = json_float(json, "netem_loss_pct")       { c.netem_loss_pct           = v; }
     if let Some(v) = json_bool(json, "disable_offloading")    { c.disable_offloading       = v; }
+    if let Some(v) = json_str(json, "server_cores")           { c.server_cores              = v; }
+    if let Some(v) = json_str(json, "client_cores")           { c.client_cores              = v; }
+    if let Some(v) = json_int(json, "rt_priority")            { c.rt_priority               = v as i32; }
+    if let Some(v) = json_bool(json, "disable_aslr")          { c.disable_aslr              = v; }
+    if let Some(v) = json_bool(json, "tune_net_buffers")      { c.tune_net_buffers          = v; }
+    if let Some(v) = json_bool(json, "drop_caches")           { c.drop_caches               = v; }
+    if let Some(v) = json_bool(json, "stop_timesyncd")        { c.stop_timesyncd            = v; }
 
     Some(c)
 }
@@ -306,12 +327,41 @@ pub fn capture_current_state() -> SetupConfig {
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
         .unwrap_or_default();
-    cfg.ns_server = if ns_out.contains("ns-server") {
-        "ns-server".into()
+    cfg.ns_server = if ns_out.contains("ns_server") {
+        "ns_server".into()
     } else { String::new() };
-    cfg.ns_client = if ns_out.contains("ns-client") {
-        "ns-client".into()
+    cfg.ns_client = if ns_out.contains("ns_client") {
+        "ns_client".into()
     } else { String::new() };
+
+    // Process isolation — read from active config if present, else defaults
+    if let Some(active) = load_active() {
+        cfg.server_cores = active.server_cores;
+        cfg.client_cores = active.client_cores;
+        cfg.rt_priority  = active.rt_priority;
+    } else {
+        cfg.server_cores = String::new();
+        cfg.client_cores = String::new();
+        cfg.rt_priority  = 0;
+    }
+
+    // Sysctl — read actual live values
+    let aslr = std::fs::read_to_string("/proc/sys/kernel/randomize_va_space")
+        .unwrap_or_default();
+    cfg.disable_aslr = aslr.trim() == "0";
+
+    let rmem = std::fs::read_to_string("/proc/sys/net/core/rmem_max")
+        .unwrap_or_default();
+    cfg.tune_net_buffers = rmem.trim().parse::<u64>().unwrap_or(0) >= 26_000_000;
+
+    cfg.drop_caches = false; // always false in preconfig — it's a one-shot action
+
+    let ts = std::process::Command::new("systemctl")
+        .args(["is-active", "systemd-timesyncd"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default();
+    cfg.stop_timesyncd = ts != "active";
 
     cfg
 }

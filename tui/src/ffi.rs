@@ -57,6 +57,15 @@ pub struct SetupConfig {
     pub netem_jitter_ms: i32,
     pub netem_loss_pct: f64,
     pub disable_offloading: bool,
+    // Process isolation
+    pub server_cores: String,   // taskset -c arg, e.g. "2,4"
+    pub client_cores: String,   // taskset -c arg, e.g. "3,5"
+    pub rt_priority: i32,       // chrt -f value; 0 = no RT scheduling
+    // Sysctl tuning
+    pub disable_aslr: bool,
+    pub tune_net_buffers: bool,
+    pub drop_caches: bool,
+    pub stop_timesyncd: bool,
 }
 
 impl Default for SetupConfig {
@@ -80,6 +89,13 @@ impl Default for SetupConfig {
             netem_jitter_ms: 5,
             netem_loss_pct: 0.1,
             disable_offloading: true,
+            server_cores: "2,4".into(),
+            client_cores: "3,5".into(),
+            rt_priority: 50,
+            disable_aslr: true,
+            tune_net_buffers: true,
+            drop_caches: true,
+            stop_timesyncd: true,
         }
     }
 }
@@ -98,6 +114,9 @@ pub struct SetupResult {
     pub swap_disabled: bool,
     pub services_stopped: bool,
     pub frequency_locked: bool,
+    pub sysctl_tuned: bool,
+    pub caches_dropped: bool,
+    pub process_isolation_ready: bool,
 }
 
 /// Build a C config struct from a SetupConfig.
@@ -136,6 +155,21 @@ fn make_c_cfg(
         netem_jitter_ms: cfg.netem_jitter_ms,
         netem_loss_pct: cfg.netem_loss_pct,
         disable_offloading: cfg.disable_offloading as i32,
+        server_cores: {
+            let mut a = [0i8; 64];
+            for (i, b) in cfg.server_cores.bytes().take(63).enumerate() { a[i] = b as i8; }
+            a
+        },
+        client_cores: {
+            let mut a = [0i8; 64];
+            for (i, b) in cfg.client_cores.bytes().take(63).enumerate() { a[i] = b as i8; }
+            a
+        },
+        rt_priority: cfg.rt_priority,
+        disable_aslr: cfg.disable_aslr as i32,
+        tune_net_buffers: cfg.tune_net_buffers as i32,
+        drop_caches: cfg.drop_caches as i32,
+        stop_timesyncd: cfg.stop_timesyncd as i32,
     }
 }
 
@@ -175,6 +209,9 @@ pub fn run_setup(cfg: &SetupConfig) -> SetupResult {
         swap_disabled: c_res.swap_disabled != 0,
         services_stopped: c_res.services_stopped != 0,
         frequency_locked: c_res.frequency_locked != 0,
+        sysctl_tuned: c_res.sysctl_tuned != 0,
+        caches_dropped: c_res.caches_dropped != 0,
+        process_isolation_ready: c_res.process_isolation_ready != 0,
     }
 }
 
@@ -451,4 +488,23 @@ impl Monitor {
 
 impl Drop for Monitor {
     fn drop(&mut self) { unsafe { benchmon_monitor_destroy(self.handle) }; }
+}
+
+/// Returns the `taskset -c X chrt -f Y ` prefix for launching a benchmark
+/// process, or an empty string if no pinning is configured.
+/// Use this in scripts as: `$(benchmon launch-prefix server)` 
+pub fn get_launch_prefix(cfg: &SetupConfig, is_server: bool) -> String {
+    let ns_s = opt_cstring(&cfg.ns_server);
+    let ns_c = opt_cstring(&cfg.ns_client);
+    let ve_s = opt_cstring(&cfg.veth_server);
+    let ve_c = opt_cstring(&cfg.veth_client);
+    let ip_s = opt_cstring(&cfg.server_ip);
+    let ip_c = opt_cstring(&cfg.client_ip);
+    let c_cfg = make_c_cfg(cfg, &ns_s, &ns_c, &ve_s, &ve_c, &ip_s, &ip_c);
+
+    let ptr = unsafe { benchmon_get_launch_prefix(&c_cfg, is_server as std::os::raw::c_int) };
+    if ptr.is_null() { return String::new(); }
+    let s = unsafe { std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned() };
+    unsafe { libc::free(ptr as *mut libc::c_void) };
+    s
 }

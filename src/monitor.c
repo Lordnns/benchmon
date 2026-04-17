@@ -195,17 +195,62 @@ static int discover_net_interfaces(benchmon_monitor_t *mon) {
     return mon->net_count;
 }
 
+/* ------------------------------------------------------------------ */
+/*  Read ns/veth names from active_config.json (falls back to defaults) */
+/* ------------------------------------------------------------------ */
+ 
+static int read_cfg_str(const char *key, char *out, size_t out_len) {
+    FILE *fp = fopen("/var/lib/benchmon/active_config.json", "r");
+    if (!fp) return -1;
+ 
+    char buf[4096];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, fp);
+    fclose(fp);
+    buf[n] = '\0';
+ 
+    char needle[64];
+    snprintf(needle, sizeof(needle), "\"%s\":", key);
+    char *p = strstr(buf, needle);
+    if (!p) return -1;
+    p += strlen(needle);
+    while (*p == ' ' || *p == '\t') p++;
+    if (*p != '"') return -1;
+    p++;
+    char *end = strchr(p, '"');
+    if (!end) return -1;
+ 
+    size_t len = (size_t)(end - p);
+    if (len >= out_len) len = out_len - 1;
+    memcpy(out, p, len);
+    out[len] = '\0';
+    return 0;
+}
+ 
 static void discover_netns_interfaces(benchmon_monitor_t *mon) {
+    char ns_s[64] = "ns_server";
+    char ns_c[64] = "ns_client";
+    char ve_s[64] = "veth-srv";
+    char ve_c[64] = "veth-cli";
+ 
+    /* Override from active config if present */
+    read_cfg_str("ns_server",   ns_s, sizeof(ns_s));
+    read_cfg_str("ns_client",   ns_c, sizeof(ns_c));
+    read_cfg_str("veth_server", ve_s, sizeof(ve_s));
+    read_cfg_str("veth_client", ve_c, sizeof(ve_c));
+ 
+    /* Label uses short tag so it fits in the 16-byte iface field */
+    char label_s[16], label_c[16];
+    snprintf(label_s, sizeof(label_s), "s:%s", ve_s);
+    snprintf(label_c, sizeof(label_c), "c:%s", ve_c);
+ 
     if (mon->net_count < 8) {
         if (init_net_ctx_via_procfs(&mon->nets[mon->net_count],
-                                    "ns-server", "veth-s",
-                                    "ns-s:veth-s") == 0)
+                                    ns_s, ve_s, label_s) == 0)
             mon->net_count++;
     }
     if (mon->net_count < 8) {
         if (init_net_ctx_via_procfs(&mon->nets[mon->net_count],
-                                    "ns-client", "veth-c",
-                                    "ns-c:veth-c") == 0)
+                                    ns_c, ve_c, label_c) == 0)
             mon->net_count++;
     }
 }

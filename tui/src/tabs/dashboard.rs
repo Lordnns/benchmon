@@ -102,7 +102,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
             ]),
             Line::from(vec![
                 status_span(v.ns_server_exists && v.ns_client_exists),
-                Span::raw("Network namespaces (ns-server, ns-client)"),
+                Span::raw("Network namespaces (ns_server, ns_client)"),
             ]),
             Line::from(vec![
                 status_span(v.netem_active),

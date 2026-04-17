@@ -41,6 +41,13 @@ pub struct benchmon_setup_config_t {
     pub netem_jitter_ms: c_int,
     pub netem_loss_pct: c_double,
     pub disable_offloading: c_int,
+    pub server_cores: [c_char; 64],
+    pub client_cores: [c_char; 64],
+    pub rt_priority: c_int,
+    pub disable_aslr: c_int,
+    pub tune_net_buffers: c_int,
+    pub drop_caches: c_int,
+    pub stop_timesyncd: c_int,
 }
 
 #[repr(C)]
@@ -58,6 +65,9 @@ pub struct benchmon_setup_result_t {
     pub swap_disabled: c_int,
     pub services_stopped: c_int,
     pub frequency_locked: c_int,
+    pub sysctl_tuned: c_int,
+    pub caches_dropped: c_int,
+    pub process_isolation_ready: c_int,
 }
 
 // ------------------------------------------------------------------ //
@@ -235,4 +245,8 @@ extern "C" {
 
     pub fn benchmon_strerror() -> *const c_char;
     pub fn benchmon_report(fd: c_int) -> benchmon_status_t;
+    pub fn benchmon_get_launch_prefix(
+        cfg: *const benchmon_setup_config_t,
+        is_server: c_int,
+    ) -> *mut c_char;
 }

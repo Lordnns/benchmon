@@ -91,6 +91,17 @@ typedef struct {
   /* Offloading -----------------------------------------------------*/
   int disable_offloading; /* 1 = disable TSO/GSO/GRO        */
 
+  /* Process isolation (stored here so scripts need zero hardcoding) */
+  char server_cores[64];  /* taskset -c arg, e.g. "2,4"     */
+  char client_cores[64];  /* taskset -c arg, e.g. "3,5"     */
+  int  rt_priority;       /* chrt -f value; 0 = no RT sched */
+
+  /* Sysctl tuning --------------------------------------------------*/
+  int disable_aslr;       /* 1 = randomize_va_space → 0     */
+  int tune_net_buffers;   /* 1 = apply rmem/wmem tuning     */
+  int drop_caches;        /* 1 = echo 3 > drop_caches       */
+  int stop_timesyncd;     /* 1 = stop systemd-timesyncd     */
+
 } benchmon_setup_config_t;
 
 /**
@@ -111,6 +122,9 @@ typedef struct {
   int swap_disabled;
   int services_stopped;
   int frequency_locked;
+  int sysctl_tuned;           /* ASLR + net buffers applied     */
+  int caches_dropped;         /* page cache flushed             */
+  int process_isolation_ready;/* server_cores/client_cores set  */
 } benchmon_setup_result_t;
 
 /**
@@ -125,10 +139,24 @@ benchmon_status_t benchmon_setup(const benchmon_setup_config_t *cfg,
                                  benchmon_setup_result_t *result);
 
 /**
- * Tear down: remove namespaces, restore IRQ affinity, re-enable swap.
+ * Tear down: remove namespaces, restore IRQ affinity, re-enable swap,
+ * and restore all sysctl values captured during setup.
  * Does NOT undo GRUB changes (those persist across reboots).
  */
 benchmon_status_t benchmon_teardown(const benchmon_setup_config_t *cfg);
+
+/**
+ * Return a heap-allocated shell prefix string for launching a benchmark
+ * process with the correct taskset + chrt settings from the config.
+ *
+ * is_server: 1 = use server_cores, 0 = use client_cores
+ *
+ * Example output: "taskset -c 2,4 chrt -f 50 "
+ * Returns "" (empty string, still heap-allocated) when no pinning configured.
+ * Caller must free() the returned string.
+ */
+char *benchmon_get_launch_prefix(const benchmon_setup_config_t *cfg,
+                                 int is_server);
 
 /* ------------------------------------------------------------------ */
 /*  Verify — Pre-flight checks                                        */
