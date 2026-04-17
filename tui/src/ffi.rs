@@ -129,6 +129,8 @@ fn make_c_cfg(
     ve_c: &Option<std::ffi::CString>,
     ip_s: &Option<std::ffi::CString>,
     ip_c: &Option<std::ffi::CString>,
+    srv_c: &Option<std::ffi::CString>,
+    cli_c: &Option<std::ffi::CString>,
 ) -> benchmon_setup_config_t {
     benchmon_setup_config_t {
         isolated_cores: if cfg.isolated_cores.is_empty() {
@@ -155,16 +157,8 @@ fn make_c_cfg(
         netem_jitter_ms: cfg.netem_jitter_ms,
         netem_loss_pct: cfg.netem_loss_pct,
         disable_offloading: cfg.disable_offloading as i32,
-        server_cores: {
-            let mut a = [0i8; 64];
-            for (i, b) in cfg.server_cores.bytes().take(63).enumerate() { a[i] = b as i8; }
-            a
-        },
-        client_cores: {
-            let mut a = [0i8; 64];
-            for (i, b) in cfg.client_cores.bytes().take(63).enumerate() { a[i] = b as i8; }
-            a
-        },
+        server_cores: srv_c.as_ref().map(|s| s.as_ptr()).unwrap_or(std::ptr::null()),
+        client_cores: cli_c.as_ref().map(|s| s.as_ptr()).unwrap_or(std::ptr::null()),
         rt_priority: cfg.rt_priority,
         disable_aslr: cfg.disable_aslr as i32,
         tune_net_buffers: cfg.tune_net_buffers as i32,
@@ -184,8 +178,10 @@ pub fn run_setup(cfg: &SetupConfig) -> SetupResult {
     let ve_c = opt_cstring(&cfg.veth_client);
     let ip_s = opt_cstring(&cfg.server_ip);
     let ip_c = opt_cstring(&cfg.client_ip);
+    let srv_c = opt_cstring(&cfg.server_cores);
+    let cli_c = opt_cstring(&cfg.client_cores);
 
-    let c_cfg = make_c_cfg(cfg, &ns_s, &ns_c, &ve_s, &ve_c, &ip_s, &ip_c);
+    let c_cfg = make_c_cfg(cfg, &ns_s, &ns_c, &ve_s, &ve_c, &ip_s, &ip_c, &srv_c, &cli_c);
 
     let mut c_res: benchmon_setup_result_t = unsafe { std::mem::zeroed() };
     unsafe { benchmon_setup(&c_cfg, &mut c_res) };
@@ -222,8 +218,10 @@ pub fn run_teardown(cfg: &SetupConfig) -> Status {
     let ve_c = opt_cstring(&cfg.veth_client);
     let ip_s = opt_cstring(&cfg.server_ip);
     let ip_c = opt_cstring(&cfg.client_ip);
+    let srv_c = opt_cstring(&cfg.server_cores);
+    let cli_c = opt_cstring(&cfg.client_cores);
 
-    let c_cfg = make_c_cfg(cfg, &ns_s, &ns_c, &ve_s, &ve_c, &ip_s, &ip_c);
+    let c_cfg = make_c_cfg(cfg, &ns_s, &ns_c, &ve_s, &ve_c, &ip_s, &ip_c, &srv_c, &cli_c);
 
     Status::from(unsafe { benchmon_teardown(&c_cfg) })
 }
@@ -273,7 +271,9 @@ pub fn run_verify_with_config(cfg: Option<&SetupConfig>) -> VerifyResult {
             let ve_c = opt_cstring(&cfg.veth_client);
             let ip_s = opt_cstring(&cfg.server_ip);
             let ip_c = opt_cstring(&cfg.client_ip);
-            let c_cfg = make_c_cfg(cfg, &ns_s, &ns_c, &ve_s, &ve_c, &ip_s, &ip_c);
+    let srv_c = opt_cstring(&cfg.server_cores);
+    let cli_c = opt_cstring(&cfg.client_cores);
+            let c_cfg = make_c_cfg(cfg, &ns_s, &ns_c, &ve_s, &ve_c, &ip_s, &ip_c, &srv_c, &cli_c);
             unsafe { benchmon_verify(&mut c_res, &c_cfg) };
         }
         None => {
@@ -500,7 +500,9 @@ pub fn get_launch_prefix(cfg: &SetupConfig, is_server: bool) -> String {
     let ve_c = opt_cstring(&cfg.veth_client);
     let ip_s = opt_cstring(&cfg.server_ip);
     let ip_c = opt_cstring(&cfg.client_ip);
-    let c_cfg = make_c_cfg(cfg, &ns_s, &ns_c, &ve_s, &ve_c, &ip_s, &ip_c);
+    let srv_c = opt_cstring(&cfg.server_cores);
+    let cli_c = opt_cstring(&cfg.client_cores);
+    let c_cfg = make_c_cfg(cfg, &ns_s, &ns_c, &ve_s, &ve_c, &ip_s, &ip_c, &srv_c, &cli_c);
 
     let ptr = unsafe { benchmon_get_launch_prefix(&c_cfg, is_server as std::os::raw::c_int) };
     if ptr.is_null() { return String::new(); }
