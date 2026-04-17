@@ -88,6 +88,9 @@ typedef struct {
   int netem_jitter_ms;   /* Jitter in ms (normal dist)     */
   double netem_loss_pct; /* Loss % per direction           */
 
+  /* Offloading -----------------------------------------------------*/
+  int disable_offloading; /* 1 = disable TSO/GSO/GRO        */
+
   /* Process isolation (stored here so scripts need zero hardcoding) */
   const char *server_cores;  /* taskset -c arg, e.g. "2,4"     */
   const char *client_cores;  /* taskset -c arg, e.g. "3,5"     */
@@ -136,15 +139,15 @@ benchmon_status_t benchmon_setup(const benchmon_setup_config_t *cfg,
                                  benchmon_setup_result_t *result);
 
 /**
- * Tear down: remove namespaces, restore IRQ affinity, re-enable swap,
- * and restore all sysctl values captured during setup.
+ * Tear down: remove namespaces, restore IRQ affinity, re-enable swap.
+ * Does NOT undo GRUB changes (those persist across reboots).
  */
 benchmon_status_t benchmon_teardown(const benchmon_setup_config_t *cfg);
 
 /**
  * Return a heap-allocated shell prefix for launching a benchmark process.
  * is_server: 1 = use server_cores, 0 = use client_cores.
- * Example output: "taskset -c 2,4 chrt -f 50 "
+ * Example: "taskset -c 2,4 chrt -f 50 "
  * Caller must free() the returned string.
  */
 char *benchmon_get_launch_prefix(const benchmon_setup_config_t *cfg,

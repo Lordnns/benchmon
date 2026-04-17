@@ -51,9 +51,7 @@ pub struct benchmon_setup_config_t {
 }
 
 impl Default for benchmon_setup_config_t {
-    fn default() -> Self {
-        unsafe { std::mem::zeroed() }
-    }
+    fn default() -> Self { unsafe { std::mem::zeroed() } }
 }
 
 #[repr(C)]
