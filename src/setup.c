@@ -471,8 +471,8 @@ static void restore_sysctl_preconfig(void) {
 
     #define EXTRACT_INT(key, dfl) ({ \
         long _v = (dfl); \
-        char *_p = strstr(buf, "\"" key \":"); \
-        if (_p) { _p += strlen("\"" key \":"); while (*_p == ' ') _p++; _v = strtol(_p, NULL, 10); } \
+        char *_p = strstr(buf, "\"" key "\":"); \
+        if (_p) { _p += strlen("\"" key "\":"); while (*_p == ' ') _p++; _v = strtol(_p, NULL, 10); } \
         _v; \
     })
 

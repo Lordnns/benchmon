@@ -102,6 +102,10 @@ typedef struct {
   int drop_caches;        /* 1 = echo 3 > drop_caches       */
   int stop_timesyncd;     /* 1 = stop systemd-timesyncd     */
 
+  /* GRUB kernel params — applied to isolated_cores list ------------*/
+  int apply_nohz_full;    /* 1 = add nohz_full=<cores>      */
+  int apply_rcu_nocbs;    /* 1 = add rcu_nocbs=<cores>      */
+
 } benchmon_setup_config_t;
 
 /**
@@ -438,4 +442,4 @@ static inline uint64_t benchmon_rdtsc(void) {
 }
 #endif
 
-#endif /* BENCHMON_H */
+#endif
