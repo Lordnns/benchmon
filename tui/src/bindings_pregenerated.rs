@@ -48,6 +48,8 @@ pub struct benchmon_setup_config_t {
     pub tune_net_buffers: c_int,
     pub drop_caches: c_int,
     pub stop_timesyncd: c_int,
+    pub apply_nohz_full: c_int,
+    pub apply_rcu_nocbs: c_int,
 }
 
 impl Default for benchmon_setup_config_t {

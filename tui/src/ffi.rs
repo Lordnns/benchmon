@@ -66,6 +66,10 @@ pub struct SetupConfig {
     pub tune_net_buffers: bool,
     pub drop_caches: bool,
     pub stop_timesyncd: bool,
+    // GRUB kernel params — applied to isolated_cores list
+    // Default true as per paper methodology; can be disabled if not needed
+    pub apply_nohz_full: bool,
+    pub apply_rcu_nocbs: bool,
 }
 
 impl Default for SetupConfig {
@@ -96,6 +100,8 @@ impl Default for SetupConfig {
             tune_net_buffers: true,
             drop_caches: true,
             stop_timesyncd: true,
+            apply_nohz_full: true,
+            apply_rcu_nocbs: true,
         }
     }
 }
@@ -164,6 +170,8 @@ fn make_c_cfg(
         tune_net_buffers: cfg.tune_net_buffers as i32,
         drop_caches: cfg.drop_caches as i32,
         stop_timesyncd: cfg.stop_timesyncd as i32,
+        apply_nohz_full: cfg.apply_nohz_full as i32,
+        apply_rcu_nocbs: cfg.apply_rcu_nocbs as i32,
     }
 }
 
@@ -271,8 +279,8 @@ pub fn run_verify_with_config(cfg: Option<&SetupConfig>) -> VerifyResult {
             let ve_c = opt_cstring(&cfg.veth_client);
             let ip_s = opt_cstring(&cfg.server_ip);
             let ip_c = opt_cstring(&cfg.client_ip);
-    let srv_c = opt_cstring(&cfg.server_cores);
-    let cli_c = opt_cstring(&cfg.client_cores);
+            let srv_c = opt_cstring(&cfg.server_cores);
+            let cli_c = opt_cstring(&cfg.client_cores);
             let c_cfg = make_c_cfg(cfg, &ns_s, &ns_c, &ve_s, &ve_c, &ip_s, &ip_c, &srv_c, &cli_c);
             unsafe { benchmon_verify(&mut c_res, &c_cfg) };
         }
@@ -492,7 +500,7 @@ impl Drop for Monitor {
 
 /// Returns the `taskset -c X chrt -f Y ` prefix for launching a benchmark
 /// process, or an empty string if no pinning is configured.
-/// Use this in scripts as: `$(benchmon launch-prefix server)` 
+/// Use this in scripts as: `$(benchmon launch-prefix server)`
 pub fn get_launch_prefix(cfg: &SetupConfig, is_server: bool) -> String {
     let ns_s = opt_cstring(&cfg.ns_server);
     let ns_c = opt_cstring(&cfg.ns_client);

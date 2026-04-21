@@ -40,6 +40,166 @@ static void result_append(benchmon_setup_result_t *r, const char *fmt, ...) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  GRUB preconfig save / restore                                      */
+/*                                                                     */
+/*  Stores exactly what nohz_full= and rcu_nocbs= looked like in      */
+/*  /proc/cmdline BEFORE benchmon ever touches GRUB.                   */
+/*  Empty string = param was completely absent from the cmdline.       */
+/*  Deleted by restore_grub_cmdline() after a successful restore so   */
+/*  the next Apply captures a fresh baseline.                          */
+/* ------------------------------------------------------------------ */
+
+#define GRUB_PRECONFIG "/var/lib/benchmon/grub_preconfig.json"
+
+/*
+ * Extract the core-list value of a cmdline param.
+ * e.g. cmdline="... nohz_full=2,3,4,5 ..." key="nohz_full" → "2,3,4,5"
+ * Returns empty string (out[0]=='\0') if the param is absent.
+ */
+static void extract_cmdline_param(const char *cmdline, const char *key,
+                                  char *out, size_t out_len)
+{
+    out[0] = '\0';
+    char needle[64];
+    snprintf(needle, sizeof(needle), "%s=", key);
+    const char *p = strstr(cmdline, needle);
+    if (!p) return;
+    p += strlen(needle);
+    size_t i = 0;
+    while (*p && *p != ' ' && *p != '\n' && i < out_len - 1)
+        out[i++] = *p++;
+    out[i] = '\0';
+}
+
+/*
+ * Save the current nohz_full/rcu_nocbs state exactly once.
+ * Guard: if the file already exists we do NOT overwrite — that would
+ * replace the true pre-benchmon baseline with a post-setup state.
+ */
+static void save_grub_preconfig(void)
+{
+    struct stat st;
+    if (stat(GRUB_PRECONFIG, &st) == 0) return; /* already saved */
+
+    char cmdline[2048] = {0};
+    benchmon_read_sysfs_str("/proc/cmdline", cmdline, sizeof(cmdline));
+
+    char nohz[256] = {0};
+    char rcu[256]  = {0};
+    extract_cmdline_param(cmdline, "nohz_full", nohz, sizeof(nohz));
+    extract_cmdline_param(cmdline, "rcu_nocbs",  rcu,  sizeof(rcu));
+
+    benchmon_exec("mkdir -p /var/lib/benchmon", NULL, 0);
+
+    /*
+     * Store as JSON strings.  Empty string = param was absent.
+     * This is the canonical restore target for teardown.
+     */
+    char json[512];
+    snprintf(json, sizeof(json),
+             "{\n"
+             "  \"nohz_full_cores\": \"%s\",\n"
+             "  \"rcu_nocbs_cores\": \"%s\"\n"
+             "}\n",
+             nohz, rcu);
+
+    FILE *fp = fopen(GRUB_PRECONFIG, "w");
+    if (fp) { fputs(json, fp); fclose(fp); }
+}
+
+/*
+ * Read a JSON string field from a small JSON file.
+ * Returns 0 on success, -1 if not found.
+ */
+static int read_json_str(const char *buf, const char *key,
+                         char *out, size_t out_len)
+{
+    char needle[128];
+    snprintf(needle, sizeof(needle), "\"%s\":", key);
+    const char *p = strstr(buf, needle);
+    if (!p) return -1;
+    p += strlen(needle);
+    while (*p == ' ' || *p == '\t') p++;
+    if (*p != '"') return -1;
+    p++;
+    const char *e = strchr(p, '"');
+    if (!e) return -1;
+    size_t len = (size_t)(e - p);
+    if (len >= out_len) len = out_len - 1;
+    memcpy(out, p, len);
+    out[len] = '\0';
+    return 0;
+}
+
+/*
+ * Restore GRUB to its pre-benchmon state and regenerate grub.cfg.
+ *
+ * Algorithm:
+ *   1. Strip ALL nohz_full= and rcu_nocbs= occurrences from GRUB.
+ *      (Unconditional — removes whatever benchmon may have written.)
+ *   2. If the saved value was non-empty, re-inject it.
+ *      If the saved value was empty (param was absent), do nothing —
+ *      the strip step already removed it completely.
+ *   3. Regenerate grub.cfg and delete the preconfig file.
+ */
+static void restore_grub_cmdline(void)
+{
+    FILE *fp = fopen(GRUB_PRECONFIG, "r");
+    if (!fp) return; /* nothing to restore */
+
+    char buf[512] = {0};
+    size_t n = fread(buf, 1, sizeof(buf) - 1, fp);
+    fclose(fp);
+    buf[n] = '\0';
+
+    char nohz[256] = {0};
+    char rcu[256]  = {0};
+    read_json_str(buf, "nohz_full_cores", nohz, sizeof(nohz));
+    read_json_str(buf, "rcu_nocbs_cores",  rcu,  sizeof(rcu));
+
+    const char *gp = "/etc/default/grub";
+    struct stat st;
+    if (stat(gp, &st) != 0) { remove(GRUB_PRECONFIG); return; }
+
+    benchmon_exec("cp /etc/default/grub /etc/default/grub.benchmon.prerestore.bak",
+                  NULL, 0);
+
+    /* Step 1: strip both params completely */
+    benchmon_exec(
+        "sed -i 's/ nohz_full=[^ \"]*//g; s/ rcu_nocbs=[^ \"]*//g' "
+        "/etc/default/grub",
+        NULL, 0);
+
+    /* Step 2: re-inject original values only if they were present */
+    if (nohz[0] != '\0') {
+        char sed[512];
+        snprintf(sed, sizeof(sed),
+                 "sed -i 's|^GRUB_CMDLINE_LINUX=\"\\(.*\\)\"|"
+                 "GRUB_CMDLINE_LINUX=\"\\1 nohz_full=%s\"|' "
+                 "/etc/default/grub",
+                 nohz);
+        benchmon_exec(sed, NULL, 0);
+    }
+    if (rcu[0] != '\0') {
+        char sed[512];
+        snprintf(sed, sizeof(sed),
+                 "sed -i 's|^GRUB_CMDLINE_LINUX=\"\\(.*\\)\"|"
+                 "GRUB_CMDLINE_LINUX=\"\\1 rcu_nocbs=%s\"|' "
+                 "/etc/default/grub",
+                 rcu);
+        benchmon_exec(sed, NULL, 0);
+    }
+
+    /* Step 3: regenerate */
+    benchmon_exec("update-grub 2>/dev/null || "
+                  "grub2-mkconfig -o /boot/grub2/grub.cfg 2>/dev/null || "
+                  "grub-mkconfig -o /boot/grub/grub.cfg 2>/dev/null",
+                  NULL, 0);
+
+    remove(GRUB_PRECONFIG);
+}
+
+/* ------------------------------------------------------------------ */
 /*  GRUB / kernel boot parameters                                      */
 /* ------------------------------------------------------------------ */
 
@@ -55,19 +215,8 @@ static int setup_grub(const benchmon_setup_config_t *cfg,
         strncat(cores, t, sizeof(cores) - strlen(cores) - 1);
     }
 
-    char params[512];
-    snprintf(params, sizeof(params),
-             "isolcpus=%s nohz_full=%s rcu_nocbs=%s "
-             "processor.max_cstate=%d nosoftlockup",
-             cores, cores, cores,
-             cfg->max_cstate >= 0 ? cfg->max_cstate : 0);
-
-    char cmdline[2048] = {0};
-    benchmon_read_sysfs_str("/proc/cmdline", cmdline, sizeof(cmdline));
-    if (strstr(cmdline, "isolcpus=") && strstr(cmdline, cores)) {
-        result_append(res, "GRUB: params already active (isolcpus=%s)", cores);
-        return 0;
-    }
+    /* Save baseline BEFORE we touch GRUB for the first time */
+    save_grub_preconfig();
 
     const char *gp = "/etc/default/grub";
     struct stat st;
@@ -76,8 +225,61 @@ static int setup_grub(const benchmon_setup_config_t *cfg,
         return -1;
     }
 
+    /*
+     * Regardless of what we are about to write, first strip any
+     * previously-applied nohz_full/rcu_nocbs so we start clean.
+     * This handles the case where the user toggled the flags off —
+     * we need to actively remove them, not just skip adding them.
+     */
+    benchmon_exec(
+        "sed -i 's/ nohz_full=[^ \"]*//g; s/ rcu_nocbs=[^ \"]*//g' "
+        "/etc/default/grub",
+        NULL, 0);
+
+    /* Build the new param string for isolcpus (always applied) */
+    char nohz_part[128] = {0};
+    char rcu_part[128]  = {0};
+    if (cfg->apply_nohz_full)
+        snprintf(nohz_part, sizeof(nohz_part), " nohz_full=%s", cores);
+    if (cfg->apply_rcu_nocbs)
+        snprintf(rcu_part, sizeof(rcu_part), " rcu_nocbs=%s", cores);
+
+    char params[512];
+    snprintf(params, sizeof(params),
+             "isolcpus=%s%s%s processor.max_cstate=%d nosoftlockup",
+             cores, nohz_part, rcu_part,
+             cfg->max_cstate >= 0 ? cfg->max_cstate : 0);
+
+    /* Check if these exact params are already active in the running kernel */
+    char cmdline[2048] = {0};
+    benchmon_read_sysfs_str("/proc/cmdline", cmdline, sizeof(cmdline));
+
+    int isolcpus_ok = (strstr(cmdline, "isolcpus=") && strstr(cmdline, cores)) ? 1 : 0;
+    int nohz_ok     = !cfg->apply_nohz_full ||
+                      (strstr(cmdline, "nohz_full=") && strstr(cmdline, cores));
+    int rcu_ok      = !cfg->apply_rcu_nocbs  ||
+                      (strstr(cmdline, "rcu_nocbs=")  && strstr(cmdline, cores));
+
+    if (isolcpus_ok && nohz_ok && rcu_ok) {
+        result_append(res, "GRUB: params already active (isolcpus=%s%s%s)",
+                      cores,
+                      cfg->apply_nohz_full ? " nohz_full=<cores>" : "",
+                      cfg->apply_rcu_nocbs  ? " rcu_nocbs=<cores>"  : "");
+        return 0;
+    }
+
     benchmon_exec("cp /etc/default/grub /etc/default/grub.benchmon.bak",
                   NULL, 0);
+
+    /*
+     * Inject isolcpus (+ nohz/rcu if enabled).
+     * Also strip any stale isolcpus before re-adding so we never duplicate.
+     */
+    benchmon_exec(
+        "sed -i 's/ isolcpus=[^ \"]*//g; "
+                 "s/ processor\\.max_cstate=[^ \"]*//g; "
+                 "s/ nosoftlockup//g' /etc/default/grub",
+        NULL, 0);
 
     char sed[2048];
     snprintf(sed, sizeof(sed),
@@ -251,7 +453,6 @@ static void capture_sysctl_preconfig(void) {
              rmem_def, wmem_def, backlog,
              timesyncd_active ? "true" : "false");
 
-    /* Use fopen/fputs to avoid warn_unused_result on write() */
     FILE *fp = fopen(PRECONFIG_SYSCTL, "w");
     if (fp) {
         fputs(json, fp);
@@ -270,8 +471,8 @@ static void restore_sysctl_preconfig(void) {
 
     #define EXTRACT_INT(key, dfl) ({ \
         long _v = (dfl); \
-        char *_p = strstr(buf, "\"" key "\":"); \
-        if (_p) { _p += strlen("\"" key "\":"); while (*_p == ' ') _p++; _v = strtol(_p, NULL, 10); } \
+        char *_p = strstr(buf, "\"" key \":"); \
+        if (_p) { _p += strlen("\"" key \":"); while (*_p == ' ') _p++; _v = strtol(_p, NULL, 10); } \
         _v; \
     })
 
@@ -571,6 +772,15 @@ benchmon_status_t benchmon_setup(const benchmon_setup_config_t *cfg,
 
 benchmon_status_t benchmon_teardown(const benchmon_setup_config_t *cfg) {
     if (!is_root()) return BENCHMON_ERR_PERM;
+
+    /*
+     * Restore GRUB to its exact pre-benchmon state.
+     * This handles all cases:
+     *   - nohz_full/rcu_nocbs were absent before → they get stripped
+     *   - they were present with different cores  → they get restored verbatim
+     *   - they were present with same cores       → they get restored verbatim
+     */
+    restore_grub_cmdline();
 
     /* Kill monitor anchor processes */
     if (cfg->ns_server_name) {

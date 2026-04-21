@@ -2,8 +2,9 @@
 //! every Apply, so Teardown can restore any previous state.
 //!
 //! Directory layout:
-//!   /tmp/benchmon_cfg_<unix_ns>/
-//!       config.json
+//!   /var/lib/benchmon/snapshots/<ISO>/
+//!       preconfig.json   — state captured before Apply
+//!       config.json      — config that was Applied
 
 #![allow(dead_code)]
 
@@ -44,10 +45,9 @@ pub fn load_active() -> Option<SetupConfig> {
 //  Save                                                               //
 // ------------------------------------------------------------------ //
 
-/// Serialize current config and write to /tmp/benchmon_cfg_<ns>/config.json.
+/// Serialize current config and write to SNAP_DIR/<ts>/<label>.json.
 /// Returns the path written, or None on error.
 pub fn save(cfg: &SetupConfig, label: &str) -> Option<String> {
-    
     let ts = chrono::Local::now().format("%Y-%m-%dT%H-%M-%S").to_string();
 
     let dir = format!("{}/{}", SNAP_DIR, ts);
@@ -63,8 +63,7 @@ pub fn save(cfg: &SetupConfig, label: &str) -> Option<String> {
 //  List                                                               //
 // ------------------------------------------------------------------ //
 
-/// Scan /tmp for benchmon_cfg_* directories and return sorted snapshot list
-/// (newest first).
+/// Scan SNAP_DIR for snapshot directories and return sorted list (newest first).
 pub fn list() -> Vec<ConfigSnapshot> {
     let mut out = Vec::new();
 
@@ -82,7 +81,7 @@ pub fn list() -> Vec<ConfigSnapshot> {
 
         if ts_ns == 0 { continue; }
 
-        let ts_secs  = ts_ns / 1_000_000_000;
+        let ts_secs = ts_ns / 1_000_000_000;
 
         for filename in ["preconfig.json", "config.json"] {
             let path = format!("{}/{}/{}", SNAP_DIR, name, filename);
@@ -147,26 +146,28 @@ fn to_json(c: &SetupConfig) -> String {
           \"disable_aslr\": {aslr},\n\
           \"tune_net_buffers\": {netbuf},\n\
           \"drop_caches\": {caches},\n\
-          \"stop_timesyncd\": {timesyncd}\n\
+          \"stop_timesyncd\": {timesyncd},\n\
+          \"apply_nohz_full\": {nohz},\n\
+          \"apply_rcu_nocbs\": {rcu}\n\
         }}",
-        cores   = c.isolated_cores.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(", "),
-        hk      = c.housekeeping_core,
-        smt     = c.disable_smt,
-        boost   = c.disable_frequency_boost,
-        cstate  = c.max_cstate,
-        irq     = c.stop_irqbalance,
-        swap    = c.disable_swap,
-        muser   = c.isolate_multiuser,
-        ns_s    = c.ns_server,
-        ns_c    = c.ns_client,
-        ve_s    = c.veth_server,
-        ve_c    = c.veth_client,
-        ip_s    = c.server_ip,
-        ip_c    = c.client_ip,
-        delay   = c.netem_delay_ms,
-        jitter  = c.netem_jitter_ms,
-        loss    = c.netem_loss_pct,
-        offload = c.disable_offloading,
+        cores     = c.isolated_cores.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(", "),
+        hk        = c.housekeeping_core,
+        smt       = c.disable_smt,
+        boost     = c.disable_frequency_boost,
+        cstate    = c.max_cstate,
+        irq       = c.stop_irqbalance,
+        swap      = c.disable_swap,
+        muser     = c.isolate_multiuser,
+        ns_s      = c.ns_server,
+        ns_c      = c.ns_client,
+        ve_s      = c.veth_server,
+        ve_c      = c.veth_client,
+        ip_s      = c.server_ip,
+        ip_c      = c.client_ip,
+        delay     = c.netem_delay_ms,
+        jitter    = c.netem_jitter_ms,
+        loss      = c.netem_loss_pct,
+        offload   = c.disable_offloading,
         srv_cores = c.server_cores,
         cli_cores = c.client_cores,
         rt_prio   = c.rt_priority,
@@ -174,6 +175,8 @@ fn to_json(c: &SetupConfig) -> String {
         netbuf    = c.tune_net_buffers,
         caches    = c.drop_caches,
         timesyncd = c.stop_timesyncd,
+        nohz      = c.apply_nohz_full,
+        rcu       = c.apply_rcu_nocbs,
     )
 }
 
@@ -185,30 +188,35 @@ fn from_json(json: &str) -> Option<SetupConfig> {
             .filter_map(|s| s.trim().parse().ok())
             .collect();
     }
-    if let Some(v) = json_int(json, "housekeeping_core")     { c.housekeeping_core        = v as i32; }
-    if let Some(v) = json_bool(json, "disable_smt")          { c.disable_smt               = v; }
-    if let Some(v) = json_bool(json, "disable_frequency_boost") { c.disable_frequency_boost = v; }
-    if let Some(v) = json_int(json, "max_cstate")             { c.max_cstate               = v as i32; }
-    if let Some(v) = json_bool(json, "stop_irqbalance")       { c.stop_irqbalance          = v; }
-    if let Some(v) = json_bool(json, "disable_swap")          { c.disable_swap             = v; }
-    if let Some(v) = json_bool(json, "isolate_multiuser")     { c.isolate_multiuser        = v; }
-    if let Some(v) = json_str(json, "ns_server")              { c.ns_server                = v; }
-    if let Some(v) = json_str(json, "ns_client")              { c.ns_client                = v; }
-    if let Some(v) = json_str(json, "veth_server")            { c.veth_server              = v; }
-    if let Some(v) = json_str(json, "veth_client")            { c.veth_client              = v; }
-    if let Some(v) = json_str(json, "server_ip")              { c.server_ip               = v; }
-    if let Some(v) = json_str(json, "client_ip")              { c.client_ip               = v; }
-    if let Some(v) = json_int(json, "netem_delay_ms")         { c.netem_delay_ms           = v as i32; }
-    if let Some(v) = json_int(json, "netem_jitter_ms")        { c.netem_jitter_ms          = v as i32; }
-    if let Some(v) = json_float(json, "netem_loss_pct")       { c.netem_loss_pct           = v; }
-    if let Some(v) = json_bool(json, "disable_offloading")    { c.disable_offloading       = v; }
-    if let Some(v) = json_str(json, "server_cores")           { c.server_cores              = v; }
-    if let Some(v) = json_str(json, "client_cores")           { c.client_cores              = v; }
-    if let Some(v) = json_int(json, "rt_priority")            { c.rt_priority               = v as i32; }
-    if let Some(v) = json_bool(json, "disable_aslr")          { c.disable_aslr              = v; }
-    if let Some(v) = json_bool(json, "tune_net_buffers")      { c.tune_net_buffers          = v; }
-    if let Some(v) = json_bool(json, "drop_caches")           { c.drop_caches               = v; }
-    if let Some(v) = json_bool(json, "stop_timesyncd")        { c.stop_timesyncd            = v; }
+    if let Some(v) = json_int(json, "housekeeping_core")        { c.housekeeping_core        = v as i32; }
+    if let Some(v) = json_bool(json, "disable_smt")             { c.disable_smt               = v; }
+    if let Some(v) = json_bool(json, "disable_frequency_boost") { c.disable_frequency_boost   = v; }
+    if let Some(v) = json_int(json, "max_cstate")               { c.max_cstate               = v as i32; }
+    if let Some(v) = json_bool(json, "stop_irqbalance")         { c.stop_irqbalance           = v; }
+    if let Some(v) = json_bool(json, "disable_swap")            { c.disable_swap              = v; }
+    if let Some(v) = json_bool(json, "isolate_multiuser")       { c.isolate_multiuser         = v; }
+    if let Some(v) = json_str(json, "ns_server")                { c.ns_server                 = v; }
+    if let Some(v) = json_str(json, "ns_client")                { c.ns_client                 = v; }
+    if let Some(v) = json_str(json, "veth_server")              { c.veth_server               = v; }
+    if let Some(v) = json_str(json, "veth_client")              { c.veth_client               = v; }
+    if let Some(v) = json_str(json, "server_ip")                { c.server_ip                 = v; }
+    if let Some(v) = json_str(json, "client_ip")                { c.client_ip                 = v; }
+    if let Some(v) = json_int(json, "netem_delay_ms")           { c.netem_delay_ms            = v as i32; }
+    if let Some(v) = json_int(json, "netem_jitter_ms")          { c.netem_jitter_ms           = v as i32; }
+    if let Some(v) = json_float(json, "netem_loss_pct")         { c.netem_loss_pct            = v; }
+    if let Some(v) = json_bool(json, "disable_offloading")      { c.disable_offloading        = v; }
+    if let Some(v) = json_str(json, "server_cores")             { c.server_cores              = v; }
+    if let Some(v) = json_str(json, "client_cores")             { c.client_cores              = v; }
+    if let Some(v) = json_int(json, "rt_priority")              { c.rt_priority               = v as i32; }
+    if let Some(v) = json_bool(json, "disable_aslr")            { c.disable_aslr              = v; }
+    if let Some(v) = json_bool(json, "tune_net_buffers")        { c.tune_net_buffers          = v; }
+    if let Some(v) = json_bool(json, "drop_caches")             { c.drop_caches               = v; }
+    if let Some(v) = json_bool(json, "stop_timesyncd")          { c.stop_timesyncd            = v; }
+    // apply_nohz_full / apply_rcu_nocbs — older snapshots without these keys
+    // will fall back to the struct Default (true), which is correct since an
+    // older preconfig that ran without the toggle implies they were applied.
+    if let Some(v) = json_bool(json, "apply_nohz_full")         { c.apply_nohz_full           = v; }
+    if let Some(v) = json_bool(json, "apply_rcu_nocbs")         { c.apply_rcu_nocbs           = v; }
 
     Some(c)
 }
@@ -247,7 +255,7 @@ fn json_bool(json: &str, key: &str) -> Option<bool> {
     let needle = format!("\"{}\":", key);
     let start  = json.find(&needle)? + needle.len();
     let rest   = json[start..].trim_start();
-    if rest.starts_with("true")  { Some(true)  }
+    if rest.starts_with("true")       { Some(true)  }
     else if rest.starts_with("false") { Some(false) }
     else { None }
 }
@@ -270,10 +278,12 @@ fn make_preview(cfg: Option<&SetupConfig>) -> String {
     match cfg {
         None => "  (unreadable)".to_string(),
         Some(c) => format!(
-            "isolcpus=[{}]  smt={}  swap={}  netem={}ms±{}ms",
+            "isolcpus=[{}]  smt={}  swap={}  nohz={}  rcu={}  netem={}ms±{}ms",
             c.isolated_cores.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(","),
             if c.disable_smt { "off" } else { "on" },
             if c.disable_swap { "off" } else { "on" },
+            if c.apply_nohz_full { "on" } else { "off" },
+            if c.apply_rcu_nocbs { "on" } else { "off" },
             c.netem_delay_ms,
             c.netem_jitter_ms,
         ),
@@ -303,8 +313,9 @@ pub fn capture_current_state() -> SetupConfig {
         .unwrap_or("1".into());
     cfg.disable_frequency_boost = boost.trim() == "0";
 
-    // Isolated cores from /proc/cmdline
+    // Kernel cmdline — isolcpus, nohz_full, rcu_nocbs
     let cmdline = std::fs::read_to_string("/proc/cmdline").unwrap_or_default();
+
     if let Some(iso) = cmdline.split_whitespace()
         .find(|p| p.starts_with("isolcpus="))
         .map(|p| p.trim_start_matches("isolcpus="))
@@ -315,6 +326,14 @@ pub fn capture_current_state() -> SetupConfig {
     } else {
         cfg.isolated_cores = vec![];
     }
+
+    // Record whether nohz_full / rcu_nocbs are present in the CURRENT cmdline.
+    // This is what the system actually has right now — could be absent entirely,
+    // or set to some cores from a previous manual config.
+    cfg.apply_nohz_full = cmdline.split_whitespace()
+        .any(|p| p.starts_with("nohz_full="));
+    cfg.apply_rcu_nocbs = cmdline.split_whitespace()
+        .any(|p| p.starts_with("rcu_nocbs="));
 
     // Swap
     let swap = std::fs::read_to_string("/proc/swaps").unwrap_or_default();

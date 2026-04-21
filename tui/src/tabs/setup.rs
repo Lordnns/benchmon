@@ -9,33 +9,35 @@ use crate::app::{App, LogLevel};
 use crate::snapshot_store;
 
 const SETUP_ITEMS: &[(&str, FieldKind)] = &[
-    ("Isolated cores (e.g. 2,3,4,5)",   FieldKind::Edit),
-    ("Housekeeping core",                FieldKind::Edit),
-    ("Disable SMT",                      FieldKind::Toggle),
-    ("Disable frequency boost",          FieldKind::Toggle),
-    ("Max C-state",                      FieldKind::Edit),
-    ("Stop irqbalance",                  FieldKind::Toggle),
-    ("Disable swap",                     FieldKind::Toggle),
-    ("Multi-user target",                FieldKind::Toggle),
-    ("NS server name",                   FieldKind::Edit),
-    ("NS client name",                   FieldKind::Edit),
-    ("Server IP (CIDR)",                 FieldKind::Edit),
-    ("Client IP (CIDR)",                 FieldKind::Edit),
-    ("NetEm delay (ms)",                 FieldKind::Edit),
-    ("NetEm jitter (ms)",                FieldKind::Edit),
-    ("NetEm loss (%)",                   FieldKind::Edit),
-    ("Disable offloading",               FieldKind::Toggle),
-    ("Server cores (e.g. 2,4)",          FieldKind::Edit),
-    ("Client cores (e.g. 3,5)",          FieldKind::Edit),
-    ("RT priority (chrt -f)",            FieldKind::Edit),
-    ("Disable ASLR",                     FieldKind::Toggle),
-    ("Tune net buffers",                 FieldKind::Toggle),
-    ("Drop caches on apply",             FieldKind::Toggle),
-    ("Stop timesyncd",                   FieldKind::Toggle),
-    ("─── Actions ───",                  FieldKind::Separator),
-    ("▶  APPLY SETUP",                   FieldKind::Action),
-    ("▶  TEARDOWN",                      FieldKind::Action),
-    ("▶  REFRESH VERIFY",                FieldKind::Action),
+    ("Isolated cores (e.g. 2,3,4,5)",   FieldKind::Edit),      // 0
+    ("Housekeeping core",                FieldKind::Edit),      // 1
+    ("Disable SMT",                      FieldKind::Toggle),    // 2
+    ("Disable frequency boost",          FieldKind::Toggle),    // 3
+    ("Max C-state",                      FieldKind::Edit),      // 4
+    ("Stop irqbalance",                  FieldKind::Toggle),    // 5
+    ("Disable swap",                     FieldKind::Toggle),    // 6
+    ("Multi-user target",                FieldKind::Toggle),    // 7
+    ("NS server name",                   FieldKind::Edit),      // 8
+    ("NS client name",                   FieldKind::Edit),      // 9
+    ("Server IP (CIDR)",                 FieldKind::Edit),      // 10
+    ("Client IP (CIDR)",                 FieldKind::Edit),      // 11
+    ("NetEm delay (ms)",                 FieldKind::Edit),      // 12
+    ("NetEm jitter (ms)",                FieldKind::Edit),      // 13
+    ("NetEm loss (%)",                   FieldKind::Edit),      // 14
+    ("Disable offloading",               FieldKind::Toggle),    // 15
+    ("Server cores (e.g. 2,4)",          FieldKind::Edit),      // 16
+    ("Client cores (e.g. 3,5)",          FieldKind::Edit),      // 17
+    ("RT priority (chrt -f)",            FieldKind::Edit),      // 18
+    ("Disable ASLR",                     FieldKind::Toggle),    // 19
+    ("Tune net buffers",                 FieldKind::Toggle),    // 20
+    ("Drop caches on apply",             FieldKind::Toggle),    // 21
+    ("Stop timesyncd",                   FieldKind::Toggle),    // 22
+    ("Apply nohz_full (tickless)",       FieldKind::Toggle),    // 23
+    ("Apply rcu_nocbs (RCU offload)",    FieldKind::Toggle),    // 24
+    ("─── Actions ───",                  FieldKind::Separator), // 25
+    ("▶  APPLY SETUP",                   FieldKind::Action),    // 26
+    ("▶  TEARDOWN",                      FieldKind::Action),    // 27
+    ("▶  REFRESH VERIFY",                FieldKind::Action),    // 28
 ];
 
 #[derive(Clone, Copy, PartialEq)]
@@ -236,7 +238,6 @@ fn render_reboot_modal(f: &mut Frame, area: Rect, _app: &App) {
     let y = area.y + area.height.saturating_sub(h) / 2;
     let modal_area = Rect { x, y, width: w.min(area.width), height: h.min(area.height) };
 
-    // Dim background by rendering a clear block
     f.render_widget(Clear, modal_area);
 
     let text = vec![
@@ -284,7 +285,6 @@ fn render_teardown_picker(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(Clear, picker_area);
 
     if app.teardown_picker_preview {
-        // Split: list on left, preview on right
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
@@ -344,6 +344,10 @@ fn render_picker_preview(f: &mut Frame, area: Rect, app: &App) {
             Line::from(format!("    {}", c.disable_frequency_boost)),
             Line::from(Span::styled("  Swap off:", Style::default().fg(Color::DarkGray))),
             Line::from(format!("    {}", c.disable_swap)),
+            Line::from(Span::styled("  nohz_full applied:", Style::default().fg(Color::DarkGray))),
+            Line::from(format!("    {}", c.apply_nohz_full)),
+            Line::from(Span::styled("  rcu_nocbs applied:", Style::default().fg(Color::DarkGray))),
+            Line::from(format!("    {}", c.apply_rcu_nocbs)),
             Line::from(Span::styled("  NetEm delay/jitter:", Style::default().fg(Color::DarkGray))),
             Line::from(format!("    {}ms / {}ms", c.netem_delay_ms, c.netem_jitter_ms)),
             Line::from(Span::styled("  NetEm loss:", Style::default().fg(Color::DarkGray))),
@@ -396,6 +400,8 @@ fn get_config_value(app: &App, idx: usize) -> String {
         20 => bool_str(c.tune_net_buffers),
         21 => bool_str(c.drop_caches),
         22 => bool_str(c.stop_timesyncd),
+        23 => bool_str(c.apply_nohz_full),
+        24 => bool_str(c.apply_rcu_nocbs),
         _  => String::new(),
     }
 }
@@ -508,24 +514,26 @@ fn toggle_field(app: &mut App, idx: usize) {
     match idx {
         2  => app.setup_config.disable_smt             = !app.setup_config.disable_smt,
         3  => app.setup_config.disable_frequency_boost = !app.setup_config.disable_frequency_boost,
-        5  => app.setup_config.stop_irqbalance          = !app.setup_config.stop_irqbalance,
-        6  => app.setup_config.disable_swap             = !app.setup_config.disable_swap,
-        7  => app.setup_config.isolate_multiuser        = !app.setup_config.isolate_multiuser,
-        15 => app.setup_config.disable_offloading       = !app.setup_config.disable_offloading,
-        19 => app.setup_config.disable_aslr             = !app.setup_config.disable_aslr,
-        20 => app.setup_config.tune_net_buffers         = !app.setup_config.tune_net_buffers,
-        21 => app.setup_config.drop_caches              = !app.setup_config.drop_caches,
-        22 => app.setup_config.stop_timesyncd           = !app.setup_config.stop_timesyncd,
+        5  => app.setup_config.stop_irqbalance         = !app.setup_config.stop_irqbalance,
+        6  => app.setup_config.disable_swap            = !app.setup_config.disable_swap,
+        7  => app.setup_config.isolate_multiuser       = !app.setup_config.isolate_multiuser,
+        15 => app.setup_config.disable_offloading      = !app.setup_config.disable_offloading,
+        19 => app.setup_config.disable_aslr            = !app.setup_config.disable_aslr,
+        20 => app.setup_config.tune_net_buffers        = !app.setup_config.tune_net_buffers,
+        21 => app.setup_config.drop_caches             = !app.setup_config.drop_caches,
+        22 => app.setup_config.stop_timesyncd          = !app.setup_config.stop_timesyncd,
+        23 => app.setup_config.apply_nohz_full         = !app.setup_config.apply_nohz_full,
+        24 => app.setup_config.apply_rcu_nocbs         = !app.setup_config.apply_rcu_nocbs,
         _  => {}
     }
 }
 
 fn run_action(app: &mut App, idx: usize) {
     match idx {
-        // APPLY SETUP — index 24 (was 17)
-        24 => {
+        // APPLY SETUP — index 26
+        26 => {
             // Save a config snapshot BEFORE applying
-             match snapshot_store::save(&snapshot_store::capture_current_state(), "preconfig") {
+            match snapshot_store::save(&snapshot_store::capture_current_state(), "preconfig") {
                 Some(path) => app.log(LogLevel::Info,
                     &format!("Pre-apply state saved: {}", path)),
                 None => app.log(LogLevel::Warn,
@@ -539,7 +547,6 @@ fn run_action(app: &mut App, idx: usize) {
                 None => app.log(LogLevel::Warn,
                     "Could not save apply config snapshot to /tmp"),
             }
-
 
             app.log(LogLevel::Info, "Running setup...");
             app.setup_running = true;
@@ -578,12 +585,12 @@ fn run_action(app: &mut App, idx: usize) {
             snapshot_store::save_active(&app.setup_config);
             app.refresh_verify();
         }
-        // TEARDOWN — index 25 (was 18)
-        25 => {
+        // TEARDOWN — index 27
+        27 => {
             app.open_teardown_picker();
         }
-        // REFRESH VERIFY — index 26 (was 19)
-        26 => {
+        // REFRESH VERIFY — index 28
+        28 => {
             app.refresh_verify();
         }
         _ => {}
