@@ -336,7 +336,7 @@ fn handle_key(app: &mut App, key: KeyEvent) {
         KeyCode::Up => {
             if app.active_tab == Tab::Setup && app.setup_selected_item > 0 {
                 app.setup_selected_item -= 1;
-                if app.setup_selected_item == 23 && app.setup_selected_item > 0 {
+                if app.setup_selected_item == 25 && app.setup_selected_item > 0 {
                     app.setup_selected_item -= 1;
                 }
             }
@@ -346,7 +346,7 @@ fn handle_key(app: &mut App, key: KeyEvent) {
                 let max = tabs::setup::item_count() - 1;
                 if app.setup_selected_item < max {
                     app.setup_selected_item += 1;
-                    if app.setup_selected_item == 23 { app.setup_selected_item += 1; }
+                    if app.setup_selected_item == 25 { app.setup_selected_item += 1; }
                 }
             }
         }
